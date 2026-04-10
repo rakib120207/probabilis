@@ -149,7 +149,7 @@ export default function Home() {
   const [pinnedDescription, setPinnedDescription] = useState("");
   const [pinnedLabel, setPinnedLabel] = useState("Scenario A");
   const [decisionSummary, setDecisionSummary] = useState<SummarizeResult | null>(null);
-  const [history, setHistory] = useState<any[]>([]);
+  const [history, setHistory] = useState<StoredScenario[]>([]);
   const [assumptions, setAssumptions] = useState<AssumptionsResult | null>(null);
   const [editedWeights, setEditedWeights] = useState<Record<string, number>>({});
   const [showAssumptions, setShowAssumptions] = useState(false);
@@ -344,7 +344,7 @@ setHistory(prev => {
   // no debounce, no API call, zero latency.
   const liveChartData = buildLocalCurve(baseProbability, confidence);
 
-  function exportSession(history: any[]): void {
+  function exportSession(history: StoredScenario[]): void {
     const payload = {
       exported_at: new Date().toISOString(),
       scenario_count: history.length,
@@ -376,6 +376,10 @@ setHistory(prev => {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  }
+  function clearHistory() {
+    // Clear the persisted history from localStorage (assuming the key used by saveToHistory)
+    localStorage.removeItem('probabilis-history');
   }
   return (
     <main className="min-h-screen p-8" style={{ background: 'var(--background)' }}>
@@ -802,8 +806,8 @@ setHistory(prev => {
         }}
         labelStyle={{ color: "#9ca3af", fontSize: 12 }}
         labelFormatter={(label) => `${label}% probability`}
-        formatter={(value: number, name: string) => [
-          value.toFixed(3),
+        formatter={(value, name) => [
+          typeof value === 'number' ? value.toFixed(3) : 'N/A',
           name === "densityA" ? "Scenario A density" : name === "densityB" ? "Scenario B density" : "density"
         ]}
       />
