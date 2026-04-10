@@ -12,6 +12,8 @@ import {
   ReferenceArea,
   ResponsiveContainer,
 } from "recharts";
+import { buildLocalCurve } from "@/lib/betaPdf";
+import { saveToHistory, StoredScenario } from "@/lib/storage";
 
 type ExtractionResult = {
   suggested_probability: number;
@@ -29,20 +31,51 @@ type SimulationResult = {
   trials: number;
   histogram_x: number[];
   histogram_y: number[];
+  rhat: number;
+  converged: boolean;
+  variance_reduction_pct: number;
+  aleatory_variance: number;
+  epistemic_variance: number;
+  aleatory_fraction: number;
+  epistemic_fraction: number;
+  uncertainty_type: string;
+  eviu: number;
 };
+
+type SensitivityResult = {
+  probability_sensitivity: number;
+  confidence_sensitivity: number;
+  prob_output_low: number;
+  prob_output_high: number;
+  conf_output_low: number;
+  conf_output_high: number;
+  dominant_factor: string;
+  probability_impact: number;
+  confidence_impact: number;
+  interpretation: string;
+};
+
 type SummarizeResult = {
   summary: string;
   key_insight: string;
   decision_framing: string;
 };
 
-// Transform the two parallel arrays into the object format recharts expects
-function buildChartData(result: SimulationResult) {
-  return result.histogram_x.map((x, i) => ({
-    probability: Math.round(x * 100),        // convert to percentage for readability
-    density: parseFloat(result.histogram_y[i].toFixed(3)),
-  }));
-}
+type Assumption = {
+  id: string;
+  label: string;
+  direction: "positive" | "negative";
+  weight: number;
+  description: string;
+};
+
+type AssumptionsResult = {
+  assumptions: Assumption[];
+  synthesis_note: string;
+};
+
+
+const API_URL = "http://127.0.0.1:8000";
 
 // Finds the density value at a given probability percentage by linear
 // interpolation between the two nearest histogram bins.
@@ -78,12 +111,26 @@ function buildComparisonData(
   }));
 }
 
+function recomputeFromAssumptions(
+  list: Assumption[],
+  weights: Record<string, number>
+): number {
+  let prob = 0.5;
+  list.forEach(a => {
+    const w = weights[a.id] ?? a.weight;
+    prob += a.direction === "positive" ? w * 0.12 : -(w * 0.12);
+  });
+  return Math.max(0.05, Math.min(0.95, Math.round(prob * 100) / 100));
+}
+
 export default function Home() {
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   const [description, setDescription] = useState("");
   const [baseProbability, setBaseProbability] = useState(0.5);
   const [confidence, setConfidence] = useState(0.5);
   const [reasoning, setReasoning] = useState("");
   const [result, setResult] = useState<SimulationResult | null>(null);
+  const [sensitivity, setSensitivity] = useState<SensitivityResult | null>(null);
   const [extracting, setExtracting] = useState(false);
   const [simulating, setSimulating] = useState(false);
   const [error, setError] = useState("");
@@ -95,6 +142,9 @@ export default function Home() {
   const [pinnedLabel, setPinnedLabel] = useState("Scenario A");
   const [decisionSummary, setDecisionSummary] = useState<SummarizeResult | null>(null);
   const [history, setHistory] = useState<any[]>([]);
+  const [assumptions, setAssumptions] = useState<AssumptionsResult | null>(null);
+  const [editedWeights, setEditedWeights] = useState<Record<string, number>>({});
+  const [showAssumptions, setShowAssumptions] = useState(false);
 
 useEffect(() => {
   // Don't auto-simulate on first render or before any manual simulation
@@ -103,11 +153,11 @@ useEffect(() => {
   // Clear any pending timer from a previous slider movement
   if (debounceTimer.current) clearTimeout(debounceTimer.current);
 
-  // Schedule a new simulation 800ms after the slider stops moving
+  // Schedule a new simulation 1200ms after the slider stops moving
   debounceTimer.current = setTimeout(async () => {
     setAutoSimulating(true);
     try {
-      const res = await fetch("http://localhost:8000/simulate", {
+      const res = await fetch(`${API_URL}/simulate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -125,7 +175,7 @@ useEffect(() => {
         i === 0 ? { ...entry, result: data } : entry
       ));
       // Fire summarization in the background — don't block the UI for it
-      fetch("http://localhost:8000/summarize", {
+      fetch(`${API_URL}/summarize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -145,13 +195,15 @@ useEffect(() => {
     } finally {
       setAutoSimulating(false);
     }
-  }, 800);
+  }, 1200);
 
   // Cleanup on unmount
   return () => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
   };
 }, [baseProbability, confidence]);
+
+
 
   async function analyzeScenario() {
     if (!description.trim()) return;
@@ -174,6 +226,19 @@ useEffect(() => {
       setBaseProbability(data.suggested_probability);
       setConfidence(data.suggested_confidence);
       setReasoning(data.reasoning);
+      fetch(`${API_URL}/assumptions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description }),
+      })
+            .then(r => r.json())
+            .then((data: AssumptionsResult) => {
+      setAssumptions(data);
+    const w: Record<string, number> = {};
+    data.assumptions.forEach(a => { w[a.id] = a.weight; });
+    setEditedWeights(w);
+  })
+  .catch(() => {});
       setExtractionMode(data.extraction_mode);
     } catch (err) {
       setError("Failed to analyze scenario. Is your backend running?");
@@ -203,8 +268,34 @@ useEffect(() => {
 
       const data: SimulationResult = await res.json();
       setResult(data);
+      const entry: StoredScenario = {
+        id: Date.now(),
+        description: description.slice(0, 120) + (description.length > 120 ? "..." : ""),
+        baseProbability,
+        confidence,
+        result: {
+          mean: data.mean,
+          std_dev: data.std_dev,
+          confidence_interval_low: data.confidence_interval_low,
+          confidence_interval_high: data.confidence_interval_high,
+          trials: data.trials,
+          rhat: data.rhat,
+          eviu: data.eviu,
+          uncertainty_type: data.uncertainty_type,
+          variance_reduction_pct: data.variance_reduction_pct,
+        },
+        extractionMode,
+        timestamp: new Date().toLocaleTimeString(),
+        isoDate: new Date().toISOString(),
+      };
+
+setHistory(prev => {
+  const updated = [entry, ...prev].slice(0, 20);
+  saveToHistory(entry);
+  return updated;
+});
       // Fire summarization in the background — don't block the UI for it
-      fetch("http://localhost:8000/summarize", {
+      fetch(`${API_URL}/summarize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -219,6 +310,20 @@ useEffect(() => {
         .then(r => r.json())
         .then(setDecisionSummary)
         .catch(err => console.error("Summary failed:", err));
+
+      // Fire sensitivity analysis in the background
+      fetch(`${API_URL}/sensitivity`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          base_probability: baseProbability,
+          confidence,
+          trials: 3000,
+        }),
+      })
+        .then(r => r.json())
+        .then(setSensitivity)
+        .catch(() => {});
     } catch (err) {
       setError("Simulation failed. Check your backend connection.");
       console.error(err);
@@ -227,10 +332,45 @@ useEffect(() => {
     }
   }
 
-  const chartData = result ? buildChartData(result) : [];
+  // This recomputes instantly on every render when sliders change —
+  // no debounce, no API call, zero latency.
+  const liveChartData = buildLocalCurve(baseProbability, confidence);
 
+  function exportSession(history: any[]): void {
+    const payload = {
+      exported_at: new Date().toISOString(),
+      scenario_count: history.length,
+      scenarios: history.map(entry => ({
+        description: entry.description,
+        base_probability: entry.baseProbability,
+        confidence: entry.confidence,
+        mean: entry.result.mean,
+        std_dev: entry.result.std_dev,
+        confidence_interval_low: entry.result.confidence_interval_low,
+        confidence_interval_high: entry.result.confidence_interval_high,
+        trials: entry.result.trials,
+        rhat: entry.result.rhat,
+        eviu: entry.result.eviu,
+        uncertainty_type: entry.result.uncertainty_type,
+        variance_reduction_pct: entry.result.variance_reduction_pct,
+        extraction_mode: entry.extractionMode,
+        timestamp: entry.timestamp,
+        iso_date: entry.isoDate,
+      })),
+    };
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `probabilis-session-${new Date().toISOString().split("T")[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
   return (
-    <main className="min-h-screen bg-gray-950 text-gray-100 p-8">
+    <main className="min-h-screen p-8" style={{ background: 'var(--background)' }}>
       <div className="max-w-2xl mx-auto">
 
         {/* Header */}
@@ -290,6 +430,69 @@ useEffect(() => {
                     </div>
                   )}
 
+                  {assumptions && (
+  <div className="mb-6">
+    <button
+      onClick={() => setShowAssumptions(!showAssumptions)}
+      className="flex items-center gap-2 text-xs text-gray-400 hover:text-gray-200 transition-colors mb-2"
+    >
+      <span>{showAssumptions ? "▼" : "▶"}</span>
+      <span className="uppercase tracking-wider">
+        Assumption Audit — {assumptions.assumptions.length} factors identified
+      </span>
+    </button>
+
+    {showAssumptions && (
+      <div className="rounded-lg border p-4 space-y-4"
+           style={{ background: 'var(--surface-1)', borderColor: 'var(--border)' }}>
+        <p className="text-xs text-gray-500 leading-relaxed">
+          {assumptions.synthesis_note} Adjust weights to see how they affect the probability estimate.
+        </p>
+
+        {assumptions.assumptions.map(a => (
+          <div key={a.id} className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className={`text-xs font-bold ${a.direction === "positive" ? "text-green-400" : "text-red-400"}`}>
+                  {a.direction === "positive" ? "+" : "−"}
+                </span>
+                <span className="text-sm text-gray-300">{a.label}</span>
+              </div>
+              <span className="text-xs text-gray-500 font-mono">
+                {((editedWeights[a.id] ?? a.weight) * 100).toFixed(0)}%
+              </span>
+            </div>
+            <p className="text-xs text-gray-600 pl-4">{a.description}</p>
+            <input
+              type="range" min={0} max={1} step={0.05}
+              value={editedWeights[a.id] ?? a.weight}
+              onChange={(e) => {
+                const newW = { ...editedWeights, [a.id]: parseFloat(e.target.value) };
+                setEditedWeights(newW);
+                setBaseProbability(recomputeFromAssumptions(assumptions.assumptions, newW));
+              }}
+              className="w-full"
+              style={{ accentColor: a.direction === "positive" ? "#34d399" : "#f87171" }}
+            />
+          </div>
+        ))}
+
+        <button
+          onClick={() => {
+            const w: Record<string, number> = {};
+            assumptions.assumptions.forEach(a => { w[a.id] = a.weight; });
+            setEditedWeights(w);
+            setBaseProbability(recomputeFromAssumptions(assumptions.assumptions, w));
+          }}
+          className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+        >
+          ↺ Reset to AI estimate
+        </button>
+      </div>
+    )}
+  </div>
+)}
+
         {/* Sliders */}
         <div className="space-y-5 mb-8">
           <div>
@@ -340,19 +543,28 @@ useEffect(() => {
 
             {/* Key Numbers */}
             <div className="grid grid-cols-3 gap-3">
-              <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 text-center">
+              <div
+                className="bg-gray-900 border rounded-lg p-4 text-center"
+                style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}
+              >
                 <p className="text-2xl font-bold text-white">
                   {(result.mean * 100).toFixed(1)}%
                 </p>
                 <p className="text-xs text-gray-500 mt-1">Mean</p>
               </div>
-              <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 text-center">
+              <div
+                className="bg-gray-900 border rounded-lg p-4 text-center"
+                style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}
+              >
                 <p className="text-2xl font-bold text-white">
                   ±{(result.std_dev * 100).toFixed(1)}%
                 </p>
                 <p className="text-xs text-gray-500 mt-1">Std Dev</p>
               </div>
-              <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 text-center">
+              <div
+                className="bg-gray-900 border rounded-lg p-4 text-center"
+                style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}
+              >
                 <p className="text-sm font-bold text-white mt-1">
                   {(result.confidence_interval_low * 100).toFixed(1)}%
                   {" – "}
@@ -361,6 +573,141 @@ useEffect(() => {
                 <p className="text-xs text-gray-500 mt-1">95% CI</p>
               </div>
             </div>
+
+            {/* Statistical Diagnostics */}
+            <div className="grid grid-cols-4 gap-2 mb-4">
+              {[
+                {
+                  label: "R-hat",
+                  value: result.rhat.toFixed(4),
+                  sub: result.converged ? "✓ Converged" : "⚠ Review inputs",
+                  ok: result.converged,
+                  tip: "Gelman-Rubin convergence. < 1.01 = fully converged."
+                },
+                {
+                  label: "Var Reduction",
+                  value: `${result.variance_reduction_pct.toFixed(1)}%`,
+                  sub: "Antithetic",
+                  ok: true,
+                  tip: "Variance reduction from antithetic variates vs naive Monte Carlo."
+                },
+                {
+                  label: "EVIU",
+                  value: result.eviu.toFixed(4),
+                  sub: result.eviu > 0.02 ? "Distrib. matters" : "Point est. fine",
+                  ok: result.eviu > 0.02,
+                  tip: "Expected Value of Including Uncertainty. High = full distribution adds real decision value."
+                },
+                {
+                  label: "Uncertainty",
+                  value: result.uncertainty_type === "epistemic-dominant" ? "Epistemic" : "Aleatory",
+                  sub: `${(result.epistemic_fraction * 100).toFixed(0)}% reducible`,
+                  ok: result.uncertainty_type === "aleatory-dominant",
+                  tip: "Epistemic = reducible (gather more info). Aleatory = irreducible inherent randomness."
+                },
+              ].map(stat => (
+                <div
+                  key={stat.label}
+                  className="relative group rounded-lg p-3 border text-center cursor-help"
+                  style={{
+                    background: 'var(--surface-1)',
+                    borderColor: stat.ok ? 'var(--border)' : '#7c3a3a'
+                  }}
+                >
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">{stat.label}</p>
+                  <p className="text-sm font-bold font-mono" style={{ color: 'var(--text-primary)' }}>
+                    {stat.value}
+                  </p>
+                  <p className={`text-xs mt-0.5 ${stat.ok ? 'text-gray-500' : 'text-red-400'}`}>
+                    {stat.sub}
+                  </p>
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2
+                                  rounded text-xs text-gray-300 opacity-0 group-hover:opacity-100
+                                  transition-opacity pointer-events-none z-10"
+                       style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                    {stat.tip}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Uncertainty Decomposition Bar */}
+            <div className="mb-4 p-4 rounded-lg border"
+                 style={{ background: 'var(--surface-1)', borderColor: 'var(--border)' }}>
+              <p className="text-xs uppercase tracking-wider text-gray-500 mb-3">
+                Uncertainty Decomposition — Der Kiureghian & Ditlevsen (2009)
+              </p>
+              <div className="flex rounded-full overflow-hidden h-2.5 mb-2">
+                <div
+                  className="transition-all duration-500"
+                  style={{ width: `${result.aleatory_fraction * 100}%`, background: '#4f8ef7' }}
+                />
+                <div
+                  className="transition-all duration-500"
+                  style={{ width: `${result.epistemic_fraction * 100}%`, background: '#fbbf24' }}
+                />
+              </div>
+              <div className="flex justify-between text-xs text-gray-500">
+                <span>
+                  <span className="inline-block w-2 h-2 rounded-full bg-blue-500 mr-1.5" />
+                  Aleatory {(result.aleatory_fraction * 100).toFixed(0)}% — irreducible
+                </span>
+                <span>
+                  <span className="inline-block w-2 h-2 rounded-full bg-yellow-500 mr-1.5" />
+                  Epistemic {(result.epistemic_fraction * 100).toFixed(0)}% — reducible
+                </span>
+              </div>
+              {result.uncertainty_type === "epistemic-dominant" && (
+                <p className="text-xs mt-2" style={{ color: '#d97706' }}>
+                  ↳ Gathering more specific evidence would meaningfully tighten this estimate.
+                </p>
+              )}
+            </div>
+
+            {sensitivity && (
+              <div className="mb-4 p-4 rounded-lg border"
+                   style={{ background: 'var(--surface-1)', borderColor: 'var(--border)' }}>
+                <p className="text-xs uppercase tracking-wider text-gray-500 mb-4">
+                  Sensitivity Analysis — Spearman Rank Correlation
+                </p>
+                <div className="space-y-4">
+                  {[
+                    {
+                      label: "Probability Estimate",
+                      value: sensitivity.probability_sensitivity,
+                      impact: `${(sensitivity.probability_impact * 100).toFixed(1)}pp range on mean`,
+                      color: "#4f8ef7",
+                    },
+                    {
+                      label: "Confidence Level",
+                      value: sensitivity.confidence_sensitivity,
+                      impact: `${(sensitivity.confidence_impact * 100).toFixed(1)}pp range on spread`,
+                      color: "#34d399",
+                    },
+                  ].map(item => (
+                    <div key={item.label}>
+                      <div className="flex justify-between text-xs mb-1.5">
+                        <span className="text-gray-400">{item.label}</span>
+                        <span className="text-gray-500">{item.impact}</span>
+                      </div>
+                      <div className="h-2 rounded-full" style={{ background: 'var(--surface-3)' }}>
+                        <div
+                          className="h-2 rounded-full transition-all duration-700"
+                          style={{ width: `${item.value * 100}%`, background: item.color, opacity: 0.85 }}
+                        />
+                      </div>
+                      <p className="text-xs text-gray-600 mt-1 text-right font-mono">
+                        ρ = {item.value.toFixed(3)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-500 mt-4 leading-relaxed border-t pt-3"
+                   style={{ borderColor: 'var(--border)' }}>
+                  {sensitivity.interpretation}
+                </p>
+              </div>
+            )}
 
             {result && !pinnedResult && (
   <button
@@ -392,7 +739,10 @@ useEffect(() => {
 )}
 
             {/* Distribution Chart — single or comparison mode */}
-<div className="bg-gray-900 border border-gray-800 rounded-lg p-5">
+<div
+  className="rounded-lg p-5"
+  style={{ background: 'var(--surface-1)', border: '1px solid var(--border)' }}
+>
   <div className="flex items-center justify-between mb-4">
     <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
       {pinnedResult ? "Scenario Comparison" : "Probability Distribution"}
@@ -412,7 +762,7 @@ useEffect(() => {
 
   <ResponsiveContainer width="100%" height={220}>
     <AreaChart
-      data={pinnedResult ? buildComparisonData(pinnedResult, result) : chartData}
+      data={pinnedResult ? buildComparisonData(pinnedResult, result) : liveChartData}
       margin={{ top: 5, right: 10, left: -20, bottom: 5 }}
     >
       <defs>
@@ -426,7 +776,7 @@ useEffect(() => {
         </linearGradient>
       </defs>
 
-      <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+      <CartesianGrid strokeDasharray="3 3" stroke="#1a2540" />
 
       <XAxis
         dataKey={pinnedResult ? "x" : "probability"}
@@ -437,7 +787,11 @@ useEffect(() => {
       <YAxis tick={{ fill: "#6b7280", fontSize: 11 }} tickLine={false} axisLine={false} />
 
       <Tooltip
-        contentStyle={{ backgroundColor: "#111827", border: "1px solid #374151", borderRadius: "8px" }}
+        contentStyle={{
+          backgroundColor: "var(--surface-2)",
+          border: "1px solid var(--border)",
+          borderRadius: "8px",
+        }}
         labelStyle={{ color: "#9ca3af", fontSize: 12 }}
         labelFormatter={(label) => `${label}% probability`}
         formatter={(value: number, name: string) => [
@@ -447,10 +801,10 @@ useEffect(() => {
       />
 
       {/* Risk band zones */}
-      <ReferenceArea x1={0} x2={25} fill="#ef4444" fillOpacity={0.06} />
-      <ReferenceArea x1={25} x2={50} fill="#f97316" fillOpacity={0.06} />
-      <ReferenceArea x1={50} x2={75} fill="#eab308" fillOpacity={0.06} />
-      <ReferenceArea x1={75} x2={100} fill="#22c55e" fillOpacity={0.06} />
+      <ReferenceArea x1={0} x2={25} fill="#ef4444" fillOpacity={0.12} />
+      <ReferenceArea x1={25} x2={50} fill="#f97316" fillOpacity={0.12} />
+      <ReferenceArea x1={50} x2={75} fill="#eab308" fillOpacity={0.12} />
+      <ReferenceArea x1={75} x2={100} fill="#22c55e" fillOpacity={0.12} />
 
       {/* Mean reference lines */}
       <ReferenceLine
@@ -505,6 +859,55 @@ useEffect(() => {
     ))}
   </div>
 </div>
+{history.length > 0 && (
+  <div className="mt-6 rounded-lg border p-5"
+       style={{ background: 'var(--surface-1)', borderColor: 'var(--border)' }}>
+    <div className="flex items-center justify-between mb-4">
+      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+        Scenario History ({history.length})
+      </p>
+      <div className="flex gap-4">
+        <button
+          onClick={() => exportSession(history)}
+          className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+        >
+          ↓ Export JSON
+        </button>
+        <button
+          onClick={() => { clearHistory(); setHistory([]); }}
+          className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+        >
+          Clear all
+        </button>
+      </div>
+    </div>
+    <div className="space-y-2">
+      {history.map(entry => (
+        <div
+          key={entry.id}
+          onClick={() => {
+            setDescription(entry.description.replace(/\.\.\.$/, ""));
+            setBaseProbability(entry.baseProbability);
+            setConfidence(entry.confidence);
+          }}
+          className="flex items-center justify-between p-3 rounded-lg cursor-pointer border transition-colors"
+          style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}
+        >
+          <div className="flex-1 min-w-0 mr-4">
+            <p className="text-sm text-gray-300 truncate">{entry.description}</p>
+            <p className="text-xs text-gray-600 mt-0.5">{entry.timestamp}</p>
+          </div>
+          <div className="text-right shrink-0">
+            <p className="text-sm font-bold font-mono" style={{ color: 'var(--text-primary)' }}>
+              {(entry.result.mean * 100).toFixed(1)}%
+            </p>
+            <p className="text-xs text-gray-500">±{(entry.result.std_dev * 100).toFixed(1)}%</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+)}
 
 {decisionSummary && (
   <div className="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-3">
