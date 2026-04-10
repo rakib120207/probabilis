@@ -22,6 +22,14 @@ type ExtractionResult = {
   extraction_mode: string;
 };
 
+type ChartPoint = {
+  x?: number;
+  probability?: number;
+  density?: number;
+  densityA?: number;
+  densityB?: number;
+};
+
 type SimulationResult = {
   mean: number;
   variance: number;
@@ -762,7 +770,7 @@ setHistory(prev => {
 
   <ResponsiveContainer width="100%" height={220}>
     <AreaChart
-      data={pinnedResult ? buildComparisonData(pinnedResult, result) : liveChartData}
+      data={(pinnedResult ? buildComparisonData(pinnedResult, result) : liveChartData) as ChartPoint[]}
       margin={{ top: 5, right: 10, left: -20, bottom: 5 }}
     >
       <defs>
