@@ -803,10 +803,15 @@ setHistory(prev => {
         }}
         labelStyle={{ color: "#9ca3af", fontSize: 12 }}
         labelFormatter={(label) => `${label}% probability`}
-        formatter={(value, name) => [
-          typeof value === 'number' ? value.toFixed(3) : 'N/A',
-          name === "densityA" ? "Scenario A density" : name === "densityB" ? "Scenario B density" : "density"
-        ]}
+        formatter={(value) => {
+  // 1. Check if value exists and is a number
+  const formattedValue = typeof value === 'number' 
+    ? value.toFixed(3) 
+    : "0.000";
+
+  // 2. Return the formatted array
+  return [formattedValue];
+}}
       />
 
       {/* Risk band zones */}
