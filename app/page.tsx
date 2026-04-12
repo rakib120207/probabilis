@@ -943,28 +943,30 @@ useEffect(() => {
     </div>
     <div className="space-y-2">
       {history.map(entry => (
-        <div
-          key={entry.id}
-          onClick={() => {
-            setDescription(entry.description.replace(/\.\.\.$/, ""));
-            setBaseProbability(entry.baseProbability);
-            setConfidence(entry.confidence);
-          }}
-          className="flex items-center justify-between p-3 rounded-lg cursor-pointer border transition-colors"
-          style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}
-        >
-          <div className="flex-1 min-w-0 mr-4">
-            <p className="text-sm text-gray-300 truncate">{entry.description}</p>
-            <p className="text-xs text-gray-600 mt-0.5">{entry.timestamp}</p>
-          </div>
-          <div className="text-right shrink-0">
-            <p className="text-sm font-bold font-mono" style={{ color: 'var(--text-primary)' }}>
-              {((entry.result.mean ?? 0) * 100).toFixed(1)}%
-              </p>
-              <p className="text-xs text-gray-500">±{((entry.result.std_dev ?? 0) * 100).toFixed(1)}%</p>
-          </div>
-        </div>
-      ))}
+  <div
+    key={entry.id}
+    onClick={() => {
+      setDescription(entry.description.replace(/\.\.\.$/, ""));
+      setBaseProbability(entry.baseProbability);
+      setConfidence(entry.confidence);
+    }}
+    className="flex items-center justify-between p-3 rounded-lg cursor-pointer border transition-colors"
+    style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}
+  >
+    <div className="flex-1 min-w-0 mr-4">
+      <p className="text-sm text-gray-300 truncate">{entry.description}</p>
+      <p className="text-xs text-gray-600 mt-0.5">{entry.timestamp}</p>
+    </div>
+    <div className="text-right shrink-0">
+      <p className="text-sm font-bold font-mono" style={{ color: 'var(--text-primary)' }}>
+        {((entry.result?.mean ?? 0) * 100).toFixed(1)}%
+      </p>
+      <p className="text-xs text-gray-500">
+        ±{((entry.result?.std_dev ?? 0) * 100).toFixed(1)}%
+      </p>
+    </div>
+  </div>
+))}
     </div>
   </div>
 )}
