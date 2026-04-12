@@ -943,6 +943,15 @@ setHistory(prev => {
           </div>
         )}
       </div>
+      <div className="mt-12 pt-4 border-t text-center" style={{ borderColor: 'var(--border)' }}>
+  <a href="/model-card"
+     className="text-xs transition-colors"
+     style={{ color: 'var(--text-muted)' }}
+     onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-secondary)')}
+     onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-muted)')}>
+    Model Card (Mitchell et al., 2019) →
+  </a>
+</div>
     </main>
   );
 }
