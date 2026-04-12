@@ -219,7 +219,7 @@ useEffect(() => {
     setExtractionMode("");
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/extract", {
+      const res = await fetch(`${API_URL}/extract`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ description }),
@@ -258,7 +258,7 @@ useEffect(() => {
     setError("");
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/simulate", {
+      const res = await fetch(`${API_URL}/simulate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
