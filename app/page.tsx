@@ -154,6 +154,10 @@ export default function Home() {
   const abortControllerRef = useRef<AbortController | null>(null);
 
 useEffect(() => {
+  fetch(`${API_URL}/health`).catch(() => {});
+}, []);
+
+useEffect(() => {
   if (isFirstRender.current) {
     isFirstRender.current = false;
     return;
