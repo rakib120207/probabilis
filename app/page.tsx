@@ -129,7 +129,7 @@ function recomputeFromAssumptions(
 }
 
 export default function Home() {
-  const API_URL = useMemo(() => process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000", []);
+  const API_URL = useMemo(() => process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000", []);
   const [description, setDescription] = useState("");
   const [baseProbability, setBaseProbability] = useState(0.5);
   const [confidence, setConfidence] = useState(0.5);
