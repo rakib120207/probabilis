@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import {
   AreaChart,
   Area,
@@ -82,9 +82,6 @@ type AssumptionsResult = {
   synthesis_note: string;
 };
 
-
-const API_URL = "http://127.0.0.1:8000";
-
 // Finds the density value at a given probability percentage by linear
 // interpolation between the two nearest histogram bins.
 // Returns 0 if the point falls outside the distribution's range.
@@ -132,7 +129,7 @@ function recomputeFromAssumptions(
 }
 
 export default function Home() {
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const API_URL = useMemo(() => process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000", []);
   const [description, setDescription] = useState("");
   const [baseProbability, setBaseProbability] = useState(0.5);
   const [confidence, setConfidence] = useState(0.5);
@@ -209,7 +206,7 @@ useEffect(() => {
   return () => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
   };
-}, [baseProbability, confidence]);
+}, [baseProbability, confidence, API_URL, description, result]);
 
 
 
