@@ -128,7 +128,14 @@ function recomputeFromAssumptions(
 }
 
 export default function Home() {
-  const API_URL = useMemo(() => process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000", []);
+const API_URL = useMemo(() => {
+  const url = process.env.NEXT_PUBLIC_API_URL;
+  if (!url) {
+    console.error("⚠️ NEXT_PUBLIC_API_URL is not set in Vercel!");
+    return "https://web-production-810f7.up.railway.app"; // ← temporary fallback
+  }
+  return url.endsWith('/') ? url.slice(0, -1) : url;
+}, []);
   const [description, setDescription] = useState("");
   const [baseProbability, setBaseProbability] = useState(0.5);
   const [confidence, setConfidence] = useState(0.5);
