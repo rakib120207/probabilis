@@ -959,9 +959,9 @@ useEffect(() => {
           </div>
           <div className="text-right shrink-0">
             <p className="text-sm font-bold font-mono" style={{ color: 'var(--text-primary)' }}>
-              {(entry.result.mean * 100).toFixed(1)}%
-            </p>
-            <p className="text-xs text-gray-500">±{(entry.result.std_dev * 100).toFixed(1)}%</p>
+              {((entry.result.mean ?? 0) * 100).toFixed(1)}%
+              </p>
+              <p className="text-xs text-gray-500">±{((entry.result.std_dev ?? 0) * 100).toFixed(1)}%</p>
           </div>
         </div>
       ))}
