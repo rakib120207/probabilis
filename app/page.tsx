@@ -93,7 +93,6 @@ function interpolateDensity(xPct: number, histX: number[], histY: number[]): num
 
   for (let i = 0; i < histX.length - 1; i++) {
     if (xProb >= histX[i] && xProb <= histX[i + 1]) {
-      // Linear interpolation between the two surrounding bins
       const t = (xProb - histX[i]) / (histX[i + 1] - histX[i]);
       return histY[i] * (1 - t) + histY[i + 1] * t;
     }
@@ -140,6 +139,7 @@ export default function Home() {
   const [simulating, setSimulating] = useState(false);
   const [error, setError] = useState("");
   const [extractionMode, setExtractionMode] = useState("");
+  const [analyzeStatus, setAnalyzeStatus] = useState("");
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
   const [autoSimulating, setAutoSimulating] = useState(false);
   const [pinnedResult, setPinnedResult] = useState<SimulationResult | null>(null);
@@ -150,16 +150,24 @@ export default function Home() {
   const [assumptions, setAssumptions] = useState<AssumptionsResult | null>(null);
   const [editedWeights, setEditedWeights] = useState<Record<string, number>>({});
   const [showAssumptions, setShowAssumptions] = useState(false);
+  const isFirstRender = useRef(true);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
 useEffect(() => {
-  // Don't auto-simulate on first render or before any manual simulation
+  if (isFirstRender.current) {
+    isFirstRender.current = false;
+    return;
+  }
   if (!result) return;
-
-  // Clear any pending timer from a previous slider movement
+  if (abortControllerRef.current) {
+    abortControllerRef.current.abort();
+  }
   if (debounceTimer.current) clearTimeout(debounceTimer.current);
 
-  // Schedule a new simulation 1200ms after the slider stops moving
   debounceTimer.current = setTimeout(async () => {
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setAutoSimulating(true);
     try {
       const res = await fetch(`${API_URL}/simulate`, {
@@ -171,174 +179,203 @@ useEffect(() => {
           confidence,
           trials: 10000,
         }),
+        signal: controller.signal,
       });
       if (!res.ok) throw new Error(`${res.status}`);
       const data: SimulationResult = await res.json();
+
+      if (controller.signal.aborted) return;
+
       setResult(data);
-      // Update history entry for this scenario in-place
-      setHistory(prev => prev.map((entry, i) =>
-        i === 0 ? { ...entry, result: data } : entry
-      ));
-      // Fire summarization in the background — don't block the UI for it
-      fetch(`${API_URL}/summarize`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          description,
-          mean: data.mean,
-          std_dev: data.std_dev,
-          confidence_interval_low: data.confidence_interval_low,
-          confidence_interval_high: data.confidence_interval_high,
-          trials: data.trials,
-        }),
-      })
-        .then(r => r.json())
-        .then(setDecisionSummary)
-        .catch(err => console.error("Summary failed:", err));
-    } catch (err) {
-      console.error("Auto-simulation failed:", err);
+      setHistory(prev =>
+        prev.map((entry, i) =>
+          i === 0 ? { ...entry, result: { ...entry.result, mean: data.mean, std_dev: data.std_dev } } : entry
+        )
+      );
+
+      try {
+        const summRes = await fetch(`${API_URL}/summarize`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            description,
+            mean: data.mean,
+            std_dev: data.std_dev,
+            confidence_interval_low: data.confidence_interval_low,
+            confidence_interval_high: data.confidence_interval_high,
+            trials: data.trials,
+          }),
+          signal: controller.signal,
+        });
+        if (summRes.ok && !controller.signal.aborted) {
+          const summData = await summRes.json();
+          setDecisionSummary(summData);
+        }
+      } catch (e) {
+        if ((e as Error).name !== "AbortError") console.warn("Summary failed:", e);
+      }
+
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") {
+        console.error("Auto-simulation failed:", e);
+      }
     } finally {
-      setAutoSimulating(false);
+      if (!controller.signal.aborted) {
+        setAutoSimulating(false);
+      }
     }
   }, 1200);
 
-  // Cleanup on unmount
   return () => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
   };
-}, [baseProbability, confidence, API_URL, description, result]);
-
-
+}, [baseProbability, confidence]);
 
   async function analyzeScenario() {
-    if (!description.trim()) return;
-    setExtracting(true);
-    setReasoning("");
-    setResult(null);
-    setError("");
-    setExtractionMode("");
+  if (!description.trim()) return;
+
+  if (abortControllerRef.current) {
+    abortControllerRef.current.abort();
+  }
+
+  setExtracting(true);
+  setAnalyzeStatus("Connecting to AI...");
+  setReasoning("");
+  setResult(null);
+  setSensitivity(null);
+  setDecisionSummary(null);
+  setAssumptions(null);
+  setError("");
+
+  const statusTimer = setTimeout(() => {
+    setAnalyzeStatus("Analyzing uncertainty signals...");
+  }, 1500);
+
+  try {
+    const res = await fetch(`${API_URL}/extract`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ description }),
+    });
+    if (!res.ok) throw new Error(`${res.status}`);
+    const data: ExtractionResult = await res.json();
+
+    setBaseProbability(data.suggested_probability);
+    setConfidence(data.suggested_confidence);
+    setReasoning(data.reasoning);
+    setExtractionMode(data.extraction_mode);
+
+    isFirstRender.current = false;
 
     try {
-      const res = await fetch(`${API_URL}/extract`, {
+      const assumpRes = await fetch(`${API_URL}/assumptions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ description }),
       });
+      if (assumpRes.ok) {
+        const assumpData: AssumptionsResult = await assumpRes.json();
+        setAssumptions(assumpData);
+        const w: Record<string, number> = {};
+        assumpData.assumptions.forEach(a => { w[a.id] = a.weight; });
+        setEditedWeights(w);
+      }
+    } catch {}
 
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      
-      const data: ExtractionResult = await res.json();
-      setBaseProbability(data.suggested_probability);
-      setConfidence(data.suggested_confidence);
-      setReasoning(data.reasoning);
-      fetch(`${API_URL}/assumptions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ description }),
-      })
-            .then(r => r.json())
-            .then((data: AssumptionsResult) => {
-      setAssumptions(data);
-    const w: Record<string, number> = {};
-    data.assumptions.forEach(a => { w[a.id] = a.weight; });
-    setEditedWeights(w);
-  })
-  .catch(() => {});
-      setExtractionMode(data.extraction_mode);
-    } catch (err) {
-      setError("Failed to analyze scenario. Is your backend running?");
-      console.error(err);
-    } finally {
-      setExtracting(false);
-    }
+  } catch (err) {
+    setError("Analysis failed. Check your backend is running.");
+  } finally {
+    clearTimeout(statusTimer);
+    setAnalyzeStatus("");
+    setExtracting(false);
   }
+}
 
   async function runSimulation() {
-    setSimulating(true);
-    setError("");
+  if (abortControllerRef.current) {
+    abortControllerRef.current.abort();
+  }
+  if (debounceTimer.current) clearTimeout(debounceTimer.current);
+
+  setSimulating(true);
+  setError("");
+
+  try {
+    const res = await fetch(`${API_URL}/simulate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        description,
+        base_probability: baseProbability,
+        confidence,
+        trials: 10000,
+      }),
+    });
+
+    if (!res.ok) throw new Error(`${res.status}`);
+    const data: SimulationResult = await res.json();
+    setResult(data);
+
+    const entry: StoredScenario = {
+      id: Date.now(),
+      description: description.slice(0, 120) + (description.length > 120 ? "..." : ""),
+      baseProbability,
+      confidence,
+      result: {
+        mean: data.mean,
+        std_dev: data.std_dev,
+        confidence_interval_low: data.confidence_interval_low,
+        confidence_interval_high: data.confidence_interval_high,
+        trials: data.trials,
+        rhat: data.rhat,
+        eviu: data.eviu,
+        uncertainty_type: data.uncertainty_type,
+        variance_reduction_pct: data.variance_reduction_pct,
+      },
+      extractionMode,
+      timestamp: new Date().toLocaleTimeString(),
+      isoDate: new Date().toISOString(),
+    };
+
+    setHistory(prev => {
+      const updated = [entry, ...prev].slice(0, 20);
+      saveToHistory(entry);
+      return updated;
+    });
 
     try {
-      const res = await fetch(`${API_URL}/simulate`, {
+      const sensitivityRes = await fetch(`${API_URL}/sensitivity`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ base_probability: baseProbability, confidence, trials: 3000 }),
+      });
+      if (sensitivityRes.ok) setSensitivity(await sensitivityRes.json());
+    } catch {}
+
+    try {
+      const summRes = await fetch(`${API_URL}/summarize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           description,
-          base_probability: baseProbability,
-          confidence,
-          trials: 10000,
+          mean: data.mean,
+          std_dev: data.std_dev,
+          confidence_interval_low: data.confidence_interval_low,
+          confidence_interval_high: data.confidence_interval_high,
+          trials: data.trials,
         }),
       });
+      if (summRes.ok) setDecisionSummary(await summRes.json());
+    } catch {}
 
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
-
-      const data: SimulationResult = await res.json();
-      setResult(data);
-      const entry: StoredScenario = {
-        id: Date.now(),
-        description: description.slice(0, 120) + (description.length > 120 ? "..." : ""),
-        baseProbability,
-        confidence,
-        result: {
-          mean: data.mean,
-          std_dev: data.std_dev,
-          confidence_interval_low: data.confidence_interval_low,
-          confidence_interval_high: data.confidence_interval_high,
-          trials: data.trials,
-          rhat: data.rhat,
-          eviu: data.eviu,
-          uncertainty_type: data.uncertainty_type,
-          variance_reduction_pct: data.variance_reduction_pct,
-        },
-        extractionMode,
-        timestamp: new Date().toLocaleTimeString(),
-        isoDate: new Date().toISOString(),
-      };
-
-setHistory(prev => {
-  const updated = [entry, ...prev].slice(0, 20);
-  saveToHistory(entry);
-  return updated;
-});
-      // Fire summarization in the background — don't block the UI for it
-      fetch(`${API_URL}/summarize`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          description,
-          mean: data.mean,
-          std_dev: data.std_dev,
-          confidence_interval_low: data.confidence_interval_low,
-          confidence_interval_high: data.confidence_interval_high,
-          trials: data.trials,
-        }),
-      })
-        .then(r => r.json())
-        .then(setDecisionSummary)
-        .catch(err => console.error("Summary failed:", err));
-
-      // Fire sensitivity analysis in the background
-      fetch(`${API_URL}/sensitivity`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          base_probability: baseProbability,
-          confidence,
-          trials: 3000,
-        }),
-      })
-        .then(r => r.json())
-        .then(setSensitivity)
-        .catch(() => {});
-    } catch (err) {
-      setError("Simulation failed. Check your backend connection.");
-      console.error(err);
-    } finally {
-      setSimulating(false);
-    }
+  } catch (err) {
+    setError("Simulation failed. Check your backend connection.");
+    console.error(err);
+  } finally {
+    setSimulating(false);
   }
+}
 
-  // This recomputes instantly on every render when sliders change —
-  // no debounce, no API call, zero latency.
   const liveChartData = buildLocalCurve(baseProbability, confidence);
 
   function exportSession(history: StoredScenario[]): void {
@@ -374,10 +411,11 @@ setHistory(prev => {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   }
+
   function clearHistory() {
-    // Clear the persisted history from localStorage (assuming the key used by saveToHistory)
     localStorage.removeItem('probabilis-history');
   }
+
   return (
     <main className="min-h-screen p-8" style={{ background: 'var(--background)' }}>
       <div className="max-w-2xl mx-auto">
@@ -804,12 +842,9 @@ setHistory(prev => {
         labelStyle={{ color: "#9ca3af", fontSize: 12 }}
         labelFormatter={(label) => `${label}% probability`}
         formatter={(value) => {
-  // 1. Check if value exists and is a number
   const formattedValue = typeof value === 'number' 
     ? value.toFixed(3) 
     : "0.000";
-
-  // 2. Return the formatted array
   return [formattedValue];
 }}
       />
