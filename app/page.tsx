@@ -448,6 +448,7 @@ useEffect(() => {
     Describe a decision. We model its uncertainty.
   </p>
 </div>
+{/* Base Probability Slider */}
 <div className="flex justify-between text-sm mb-2">
   <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>
     Base Probability
@@ -456,7 +457,15 @@ useEffect(() => {
     {(baseProbability * 100).toFixed(0)}%
   </span>
 </div>
-{/* Helper text under confidence slider */}
+{/* Confidence Slider */}
+<div className="flex justify-between text-sm mb-2">
+  <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>
+    Confidence in Estimate
+  </span>
+  <span className="font-bold" style={{ color: 'var(--text-primary)' }}>
+    {(confidence * 100).toFixed(0)}%
+  </span>
+</div>
 <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
   Lower confidence = wider distribution = more uncertainty
 </p>
@@ -467,19 +476,12 @@ useEffect(() => {
 </p>
 
 {/* Section labels throughout — uppercase tracking */}
-{/* Replace all instances of text-gray-400 uppercase tracking-wider with: */}
-style={{ color: 'var(--text-label)' }}
+{/* Replace all instances of text-gray-400 uppercase tracking-wider with style={{ color: 'var(--text-label)' }} */}
 
 {/* Stat card labels */}
 <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Mean</p>
 
-{/* History entry description */}
-<p className="text-sm truncate" style={{ color: 'var(--text-secondary)' }}>
-  {entry.description}
-</p>
-<p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-  {entry.timestamp}
-</p>
+{/* History entry description — removed; defined in map below */}
 
         {/* Scenario Input */}
         <div className="mb-4">
@@ -514,21 +516,24 @@ style={{ color: 'var(--text-label)' }}
 
         {/* AI Reasoning */}
         {reasoning && (
-          <div className="mb-6 p-4 bg-blue-950/50 border border-blue-800 rounded-lg">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-semibold text-blue-400 uppercase tracking-wider">
-                AI Interpretation
-                </p>
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                  extractionMode.startsWith("ai")
-                  ? "bg-green-900/50 text-green-400 border border-green-800": "bg-yellow-900/50 text-yellow-400 border border-yellow-800"
-                  }`}>
-                    {extractionMode.startsWith("ai") ? "⚡ Llama" : "📐 Linguistic"}
-                    </span>
-                    </div>
-                    <p className="text-sm text-gray-300 leading-relaxed">{reasoning}</p>
-                    </div>
-                  )}
+  <div className="mb-6 p-4 bg-blue-950/50 border border-blue-800 rounded-lg">
+    <div className="flex items-center justify-between mb-2">
+      <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-label)' }}>
+        AI Interpretation
+      </p>
+      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+        extractionMode.startsWith("ai")
+          ? "bg-green-900/50 text-green-400 border border-green-800"
+          : "bg-yellow-900/50 text-yellow-400 border border-yellow-800"
+      }`}>
+        {extractionMode.startsWith("ai") ? "⚡ Llama" : "📐 Linguistic"}
+      </span>
+    </div>
+    <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+      {reasoning}
+    </p>
+  </div>
+)}
 
                   {assumptions && (
   <div className="mb-6">
