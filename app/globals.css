@@ -9,8 +9,9 @@
   --border-subtle: #162035;
 
   --text-primary: #e8edf5;
-  --text-secondary: #8b9ab5;
-  --text-muted: #4a5a78;
+  --text-secondary: #a8b8d0;    /* was #8b9ab5 — brighter */
+  --text-muted: #6a7a98;         /* was #4a5a78 — brighter */
+  --text-label: #94a3b8;         /* new — for section labels */
 
   --accent-blue: #4f8ef7;
   --accent-blue-dim: #1e3a6e;
@@ -25,5 +26,14 @@
 body {
   background: var(--background);
   color: var(--text-primary);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
+
+/* Override Tailwind grays globally to use our scale */
+.text-gray-300 { color: var(--text-secondary) !important; }
+.text-gray-400 { color: var(--text-label) !important; }
+.text-gray-500 { color: var(--text-muted) !important; }
+.text-gray-600 { color: #576a88 !important; }
+
+/* Ensure stat values are always fully bright */
+.font-bold.font-mono { color: var(--text-primary); }

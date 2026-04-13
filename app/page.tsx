@@ -153,7 +153,15 @@ const API_URL = useMemo(() => {
   const [pinnedDescription, setPinnedDescription] = useState("");
   const [pinnedLabel, setPinnedLabel] = useState("Scenario A");
   const [decisionSummary, setDecisionSummary] = useState<SummarizeResult | null>(null);
-  const [history, setHistory] = useState<StoredScenario[]>([]);
+  const [history, setHistory] = useState<StoredScenario[]>(() => {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem("probabilis_history_v1");
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+});
   const [assumptions, setAssumptions] = useState<AssumptionsResult | null>(null);
   const [editedWeights, setEditedWeights] = useState<Record<string, number>>({});
   const [showAssumptions, setShowAssumptions] = useState(false);
@@ -433,11 +441,45 @@ useEffect(() => {
 
         {/* Header */}
         <div className="mb-10">
-          <h1 className="text-3xl font-bold tracking-tight">Probabilis</h1>
-          <p className="text-gray-400 mt-1">
-            Describe a decision. We model its uncertainty.
-          </p>
-        </div>
+  <h1 className="text-3xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>
+    Probabilis
+  </h1>
+  <p className="mt-1" style={{ color: 'var(--text-secondary)' }}>
+    Describe a decision. We model its uncertainty.
+  </p>
+</div>
+<div className="flex justify-between text-sm mb-2">
+  <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>
+    Base Probability
+  </span>
+  <span className="font-bold" style={{ color: 'var(--text-primary)' }}>
+    {(baseProbability * 100).toFixed(0)}%
+  </span>
+</div>
+{/* Helper text under confidence slider */}
+<p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+  Lower confidence = wider distribution = more uncertainty
+</p>
+
+{/* AI reasoning text */}
+<p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+  {reasoning}
+</p>
+
+{/* Section labels throughout — uppercase tracking */}
+{/* Replace all instances of text-gray-400 uppercase tracking-wider with: */}
+style={{ color: 'var(--text-label)' }}
+
+{/* Stat card labels */}
+<p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Mean</p>
+
+{/* History entry description */}
+<p className="text-sm truncate" style={{ color: 'var(--text-secondary)' }}>
+  {entry.description}
+</p>
+<p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+  {entry.timestamp}
+</p>
 
         {/* Scenario Input */}
         <div className="mb-4">
