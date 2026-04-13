@@ -441,13 +441,11 @@ useEffect(() => {
 
         {/* Header */}
         <div className="mb-10">
-  <h1 className="text-3xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>
-    Probabilis
-  </h1>
-  <p className="mt-1" style={{ color: 'var(--text-secondary)' }}>
-    Describe a decision. We model its uncertainty.
-  </p>
-</div>
+          <h1 className="text-3xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>Probabilis</h1>
+          <p className="mt-1" style={{ color: 'var(--text-secondary)' }}>
+            Describe a decision. We model its uncertainty.
+          </p>
+        </div>
 {/* Base Probability Slider */}
 <div className="flex justify-between text-sm mb-2">
   <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>
@@ -516,24 +514,20 @@ useEffect(() => {
 
         {/* AI Reasoning */}
         {reasoning && (
-  <div className="mb-6 p-4 bg-blue-950/50 border border-blue-800 rounded-lg">
-    <div className="flex items-center justify-between mb-2">
-      <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-label)' }}>
-        AI Interpretation
-      </p>
-      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-        extractionMode.startsWith("ai")
-          ? "bg-green-900/50 text-green-400 border border-green-800"
-          : "bg-yellow-900/50 text-yellow-400 border border-yellow-800"
-      }`}>
-        {extractionMode.startsWith("ai") ? "⚡ Llama" : "📐 Linguistic"}
-      </span>
-    </div>
-    <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-      {reasoning}
-    </p>
-  </div>
-)}
+          <div className="mb-6 p-4 bg-blue-950/50 border border-blue-800 rounded-lg">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-label)' }}>
+                AI Interpretation
+              </p>
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                extractionMode.startsWith("ai") ? "bg-green-900/50 text-green-400 border border-green-800" : "bg-yellow-900/50 text-yellow-400 border border-yellow-800"
+              }`}>
+                {extractionMode.startsWith("ai") ? "⚡ Llama" : "📐 Linguistic"}
+              </span>
+            </div>
+            <p className="text-sm text-gray-300 leading-relaxed">{reasoning}</p>
+          </div>
+        )}
 
                   {assumptions && (
   <div className="mb-6">
