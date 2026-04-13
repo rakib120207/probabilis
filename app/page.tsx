@@ -637,30 +637,30 @@ useEffect(() => {
               {[
                 {
                   label: "R-hat",
-                  value: result.rhat.toFixed(4),
-                  sub: result.converged ? "✓ Converged" : "⚠ Review inputs",
-                  ok: result.converged,
+                  value: result.rhat?.toFixed(4) ?? "—",
+                  sub: result.converged != null ? (result.converged ? "✓ Converged" : "⚠ Review inputs") : "—",
+                  ok: result.converged ?? true,
                   tip: "Gelman-Rubin convergence. < 1.01 = fully converged."
                 },
                 {
                   label: "Var Reduction",
-                  value: `${result.variance_reduction_pct.toFixed(1)}%`,
+                  value: result.variance_reduction_pct != null ? `${result.variance_reduction_pct.toFixed(1)}%` : "—",
                   sub: "Antithetic",
                   ok: true,
                   tip: "Variance reduction from antithetic variates vs naive Monte Carlo."
                 },
                 {
                   label: "EVIU",
-                  value: result.eviu.toFixed(4),
-                  sub: result.eviu > 0.02 ? "Distrib. matters" : "Point est. fine",
-                  ok: result.eviu > 0.02,
+                  value: result.eviu?.toFixed(4) ?? "—",
+                  sub: result.eviu != null ? (result.eviu > 0.02 ? "Distrib. matters" : "Point est. fine") : "—",
+                  ok: result.eviu != null ? result.eviu > 0.02 : true,
                   tip: "Expected Value of Including Uncertainty. High = full distribution adds real decision value."
                 },
                 {
                   label: "Uncertainty",
-                  value: result.uncertainty_type === "epistemic-dominant" ? "Epistemic" : "Aleatory",
-                  sub: `${(result.epistemic_fraction * 100).toFixed(0)}% reducible`,
-                  ok: result.uncertainty_type === "aleatory-dominant",
+                  value: result.uncertainty_type === "epistemic-dominant" ? "Epistemic" : result.uncertainty_type === "aleatory-dominant" ? "Aleatory" : "—",
+                  sub: result.epistemic_fraction != null ? `${(result.epistemic_fraction * 100).toFixed(0)}% reducible` : "—",
+                  ok: result.uncertainty_type !== "epistemic-dominant",
                   tip: "Epistemic = reducible (gather more info). Aleatory = irreducible inherent randomness."
                 },
               ].map(stat => (
@@ -690,37 +690,39 @@ useEffect(() => {
             </div>
 
             {/* Uncertainty Decomposition Bar */}
-            <div className="mb-4 p-4 rounded-lg border"
-                 style={{ background: 'var(--surface-1)', borderColor: 'var(--border)' }}>
-              <p className="text-xs uppercase tracking-wider text-gray-500 mb-3">
-                Uncertainty Decomposition — Der Kiureghian & Ditlevsen (2009)
-              </p>
-              <div className="flex rounded-full overflow-hidden h-2.5 mb-2">
-                <div
-                  className="transition-all duration-500"
-                  style={{ width: `${result.aleatory_fraction * 100}%`, background: '#4f8ef7' }}
-                />
-                <div
-                  className="transition-all duration-500"
-                  style={{ width: `${result.epistemic_fraction * 100}%`, background: '#fbbf24' }}
-                />
-              </div>
-              <div className="flex justify-between text-xs text-gray-500">
-                <span>
-                  <span className="inline-block w-2 h-2 rounded-full bg-blue-500 mr-1.5" />
-                  Aleatory {(result.aleatory_fraction * 100).toFixed(0)}% — irreducible
-                </span>
-                <span>
-                  <span className="inline-block w-2 h-2 rounded-full bg-yellow-500 mr-1.5" />
-                  Epistemic {(result.epistemic_fraction * 100).toFixed(0)}% — reducible
-                </span>
-              </div>
-              {result.uncertainty_type === "epistemic-dominant" && (
-                <p className="text-xs mt-2" style={{ color: '#d97706' }}>
-                  ↳ Gathering more specific evidence would meaningfully tighten this estimate.
-                </p>
-              )}
-            </div>
+{result.aleatory_fraction != null && result.epistemic_fraction != null && (
+  <div className="mb-4 p-4 rounded-lg border"
+       style={{ background: 'var(--surface-1)', borderColor: 'var(--border)' }}>
+    <p className="text-xs uppercase tracking-wider text-gray-500 mb-3">
+      Uncertainty Decomposition — Der Kiureghian & Ditlevsen (2009)
+    </p>
+    <div className="flex rounded-full overflow-hidden h-2.5 mb-2">
+      <div
+        className="transition-all duration-500"
+        style={{ width: `${result.aleatory_fraction * 100}%`, background: '#4f8ef7' }}
+      />
+      <div
+        className="transition-all duration-500"
+        style={{ width: `${result.epistemic_fraction * 100}%`, background: '#fbbf24' }}
+      />
+    </div>
+    <div className="flex justify-between text-xs text-gray-500">
+      <span>
+        <span className="inline-block w-2 h-2 rounded-full bg-blue-500 mr-1.5" />
+        Aleatory {(result.aleatory_fraction * 100).toFixed(0)}% — irreducible
+      </span>
+      <span>
+        <span className="inline-block w-2 h-2 rounded-full bg-yellow-500 mr-1.5" />
+        Epistemic {(result.epistemic_fraction * 100).toFixed(0)}% — reducible
+      </span>
+    </div>
+    {result.uncertainty_type === "epistemic-dominant" && (
+      <p className="text-xs mt-2" style={{ color: '#d97706' }}>
+        ↳ Gathering more specific evidence would meaningfully tighten this estimate.
+      </p>
+    )}
+  </div>
+)}
 
             {sensitivity && (
               <div className="mb-4 p-4 rounded-lg border"
