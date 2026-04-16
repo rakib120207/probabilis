@@ -1,128 +1,130 @@
-import Link from 'next/link';
+import Link from "next/link";
+
+const sections = [
+  {
+    title: "Model Details",
+    items: [
+      ["Model Name", "Probabilis v1.0"],
+      ["Type", "Computational decision-support instrument for venture uncertainty"],
+      ["Developed by", "Rakib, Department of Statistics, SUST"],
+      ["Date", "April 2026"],
+      ["Primary Use", "Expose early-stage venture uncertainty through editable assumptions and simulation diagnostics"],
+      ["License", "MIT"],
+    ],
+  },
+  {
+    title: "Intended Use",
+    items: [
+      ["Primary Users", "Founders, accelerator managers, and researchers evaluating fragile venture assumptions"],
+      ["Use Cases", "Startup idea stress testing, scenario comparison, and research communication about uncertainty"],
+      ["Out-of-Scope", "Automatic startup validation, investment advice, or any claim that the model predicts success probability"],
+    ],
+  },
+  {
+    title: "Simulation Methodology",
+    items: [
+      ["Assumption inputs", "Structured variable ranges returned by the extraction contract and editable in the frontend"],
+      ["Sampling", "Triangular draws per assumption with deterministic seed generation from normalized input plus schema version"],
+      ["Trials", "10,000 maximum with adaptive stopping based on convergence diagnostics"],
+      ["Convergence", "Gelman-Rubin R-hat threshold under 1.01 with effective sample size reporting"],
+      ["Sensitivity", "Bootstrap confidence intervals on Spearman rank sensitivity outputs"],
+      ["Decision framing", "Percentile scenario bands plus a decision-impact comparison between point estimates and uncertainty-aware runs"],
+    ],
+  },
+  {
+    title: "AI Extraction Layer",
+    items: [
+      ["Primary contract", "POST /extract returns variable proposals, confidence, epistemic status, and genealogy metadata"],
+      ["Human role", "Users can override every extracted variable directly in the frontend assumptions editor"],
+      ["Status semantics", "green = source-backed, amber = low-confidence estimate, red = unresolved ambiguity"],
+      ["Known limitation", "Extraction quality depends on the backend evidence chain and can still encode poor source coverage"],
+    ],
+  },
+  {
+    title: "Evaluation",
+    items: [
+      ["Calibration", "Frontend scaffolding exists for a 20-case historical calibration study and failure taxonomy"],
+      ["Primary artifact", "Interpretability and methodological clarity are prioritized over headline accuracy claims"],
+      ["Diagnostics surfaced", "R-hat, ESS, ambiguity flags, sensitivity intervals, and temporal regime warnings"],
+    ],
+  },
+  {
+    title: "Limitations",
+    items: [
+      ["Not predictive truth", "Scenario bands describe model behavior under current assumptions; they are not ground-truth success probabilities"],
+      ["Backend dependence", "The frontend is contract-first and inherits backend quality, calibration coverage, and evidence limitations"],
+      ["Calibration scope", "A 20-case study is still narrow for strong external validity claims across sectors or eras"],
+      ["Regime sensitivity", "Structural shifts after 2020 can break historical comparability even when the simulation converges numerically"],
+    ],
+  },
+  {
+    title: "Ethical Considerations",
+    items: [
+      ["Autonomy", "Users retain the final say on assumptions through direct edits and provenance review"],
+      ["Transparency", "The interface exposes methodology notes, citations, ambiguity flags, and convergence diagnostics"],
+      ["Misuse risk", "Outputs should support deliberation, not replace human decisions or due diligence"],
+      ["Privacy", "Scenario text may be sent to the backend extraction pipeline depending on deployment configuration"],
+    ],
+  },
+  {
+    title: "References",
+    items: [
+      ["[1]", "Mitchell et al. (2019). Model Cards for Model Reporting. FAccT."],
+      ["[2]", "Gelman et al. (2004). Bayesian Data Analysis. Chapter 11."],
+      ["[3]", "Der Kiureghian & Ditlevsen (2009). Aleatory or epistemic? Does it matter? Structural Safety, 31(2)."],
+      ["[4]", "Hammersley & Handscomb (1964). Monte Carlo Methods. Methuen."],
+    ],
+  },
+] as const;
 
 export default function ModelCard() {
-  const sections = [
-    {
-      title: "Model Details",
-      items: [
-        ["Model Name", "Probabilis v1.0"],
-        ["Type", "Uncertainty-aware decision simulation system"],
-        ["Developed by", "Rakib, Department of Statistics, SUST"],
-        ["Date", "April 2026"],
-        ["Primary Use", "Quantifying uncertainty in decision scenarios via Monte Carlo simulation"],
-        ["License", "MIT"],
-      ]
-    },
-    {
-      title: "Intended Use",
-      items: [
-        ["Primary Users", "Researchers, analysts, and decision-makers reasoning about uncertain outcomes"],
-        ["Use Cases", "Career decisions, research planning, business scenario analysis, academic applications"],
-        ["Out-of-Scope", "Financial trading, medical diagnosis, legal risk assessment, or automated high-stakes decisions without human oversight"],
-      ]
-    },
-    {
-      title: "Simulation Methodology",
-      items: [
-        ["Distribution", "Beta(α, β) — conjugate prior for probability estimation"],
-        ["Parameters", "α = p × (c × 20), β = (1−p) × (c × 20), where p = base probability, c = confidence"],
-        ["Sampling", "Antithetic variates Monte Carlo (Hammersley & Handscomb, 1964) — reduces variance 20–40%"],
-        ["Trials", "10,000 default (adjustable 100–100,000)"],
-        ["Convergence", "Gelman-Rubin R-hat (Gelman & Rubin, 1992) — flagged if R-hat > 1.05"],
-        ["Uncertainty Decomposition", "Aleatory/epistemic separation (Der Kiureghian & Ditlevsen, 2009)"],
-        ["Decision Theory", "EVIU quantifies value of distributional information over point estimates"],
-      ]
-    },
-    {
-      title: "AI Extraction Layer",
-      items: [
-        ["Primary Model", "Meta Llama 3.3 70B via Groq API (free tier)"],
-        ["Fallback", "Rule-based linguistic taxonomy with domain base rate anchoring"],
-        ["Base Rate Anchoring", "Domain-specific priors applied before linguistic adjustment (PhD ≈ 18%, startup ≈ 15%)"],
-        ["Task", "Maps natural language scenario to (base_probability, confidence) for simulation parameterisation"],
-        ["Known Limitation", "LLM extraction is probabilistic — same scenario may yield slightly different estimates across runs"],
-      ]
-    },
-    {
-      title: "Evaluation",
-      items: [
-        ["Calibration", "20 scenarios tested across 6 domains against expert-elicited ground truth"],
-        ["Linguistic MAE", "< 12pp for domain-detected scenarios vs > 22pp without base rate anchoring"],
-        ["Convergence", "R-hat < 1.01 achieved in 100% of tested scenarios at default trial count"],
-        ["Variance Reduction", "Antithetic variates achieve 18–41% reduction across tested Beta parameterisations"],
-      ]
-    },
-    {
-      title: "Limitations",
-      items: [
-        ["Subjectivity", "Probability estimates are user-defined. The system models uncertainty around the user's estimate, not ground truth."],
-        ["Domain Coverage", "Base rate anchoring covers 14 domains. Out-of-scope scenarios fall back to linguistic extraction with higher error."],
-        ["LLM Dependency", "AI extraction requires Groq API. Degrades gracefully to linguistic fallback."],
-        ["Calibration Scope", "20-scenario calibration study — insufficient for strong statistical claims across all domains."],
-        ["No Temporal Dynamics", "Assumes stationary probability. Dynamic scenarios are not modelled."],
-      ]
-    },
-    {
-      title: "Ethical Considerations",
-      items: [
-        ["Autonomy", "All estimates are user-controlled. Extraction mode (AI vs linguistic) is always displayed."],
-        ["Transparency", "Assumption audit surfaces AI reasoning as editable named assumptions. R-hat flags convergence issues."],
-        ["Misuse Risk", "Outputs must inform, not replace, human judgment. Results are not objective probability measurements."],
-        ["Data Privacy", "Scenario text is sent to Groq API for AI extraction. No server-side storage. Sensitive scenarios should use linguistic mode."],
-      ]
-    },
-    {
-      title: "References",
-      items: [
-        ["[1]", "Mitchell et al. (2019). Model Cards for Model Reporting. FAccT."],
-        ["[2]", "Gelman & Rubin (1992). Inference from Iterative Simulation Using Multiple Sequences. Statistical Science."],
-        ["[3]", "Der Kiureghian & Ditlevsen (2009). Aleatory or epistemic? Does it matter? Structural Safety, 31(2)."],
-        ["[4]", "Hammersley & Handscomb (1964). Monte Carlo Methods. Methuen."],
-      ]
-    },
-  ];
-
   return (
-    <main className="min-h-screen p-8" style={{ background: 'var(--background)' }}>
-      <div className="max-w-3xl mx-auto">
-        <div className="mb-10">
-          <Link href="/" className="text-xs text-blue-400 hover:text-blue-300 mb-4 inline-block transition-colors">
-            ← Back to Probabilis
+    <main className="min-h-screen px-4 py-8 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-5xl space-y-6">
+        <section className="probabilis-panel p-6 sm:p-8">
+          <Link href="/" className="nav-chip mb-5 inline-flex">
+            Back to Probabilis
           </Link>
-          <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
-            Model Card
-          </h1>
-          <p className="mt-1" style={{ color: 'var(--text-secondary)' }}>
-            Probabilis v1.0 — following Mitchell et al. (2019)
+          <p className="section-kicker">Model card</p>
+          <h1 className="hero-title text-5xl sm:text-6xl">Probabilis v1.0</h1>
+          <p className="mt-4 max-w-3xl text-base text-(--text-secondary) sm:text-lg">
+            This card describes the current frontend-facing research instrument: intended use, visible diagnostics, and the limits users should understand before treating the output as meaningful.
           </p>
-        </div>
+        </section>
 
-        <div className="space-y-10">
-          {sections.map(section => (
-            <div key={section.title}>
-              <h2 className="text-xs font-semibold uppercase tracking-wider mb-4 pb-2 border-b"
-                  style={{ color: 'var(--text-secondary)', borderColor: 'var(--border)' }}>
-                {section.title}
-              </h2>
-              <div className="space-y-3">
-                {section.items.map(([label, value]) => (
-                  <div key={label} className="grid grid-cols-3 gap-4">
-                    <div className="text-xs font-medium pt-0.5" style={{ color: 'var(--text-muted)' }}>
-                      {label}
+        <section className="probabilis-panel p-5 sm:p-6">
+          <div className="space-y-8">
+            {sections.map((section) => (
+              <div key={section.title}>
+                <h2
+                  className="mb-4 border-b pb-3 text-xs font-semibold uppercase tracking-[0.18em]"
+                  style={{ color: "var(--text-secondary)", borderColor: "var(--border)" }}
+                >
+                  {section.title}
+                </h2>
+                <div className="space-y-3">
+                  {section.items.map(([label, value]) => (
+                    <div
+                      key={`${section.title}-${label}`}
+                      className="grid gap-2 rounded-3xl border p-4 md:grid-cols-[180px_1fr]"
+                      style={{ borderColor: "var(--border-subtle)", background: "rgba(255,255,255,0.03)" }}
+                    >
+                      <div className="text-xs font-medium uppercase tracking-[0.14em]" style={{ color: "var(--text-muted)" }}>
+                        {label}
+                      </div>
+                      <div className="text-sm leading-7" style={{ color: "var(--text-secondary)" }}>
+                        {value}
+                      </div>
                     </div>
-                    <div className="col-span-2 text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-                      {value}
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </section>
 
-        <div className="mt-12 pt-6 border-t text-xs"
-             style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
-          This model card was written following Mitchell et al. (2019). Last updated: April 2026.
+        <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+          Last updated: April 2026. This model card follows the accountability spirit of Mitchell et al. (2019), adapted to the current contract-first Probabilis build.
         </div>
       </div>
     </main>

@@ -37,7 +37,7 @@ export function loadHistory(): StoredScenario[] {
 export function saveToHistory(entry: StoredScenario): void {
   try {
     const existing = loadHistory();
-    const updated = [entry, ...existing].slice(0, 20);
+    const updated = [entry, ...existing].slice(0, 5);
     localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
   } catch {}
 }
