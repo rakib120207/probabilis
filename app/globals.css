@@ -1,252 +1,227 @@
 @import "tailwindcss";
 
+/* ── Design System ─────────────────────────────────────────────────────────
+   Philosophy: academic terminal. Statistical output as UI.
+   Think: R console × LaTeX × scientific instrument.
+   Monochrome base. Color only where data demands it.
+   ──────────────────────────────────────────────────────────────────────── */
+
 :root {
-  --background: #09131c;
-  --surface-1: #0f1623;
-  --surface-2: #141d2e;
-  --surface-3: #1a2540;
-  --border: #1e2d45;
-  --border-subtle: #162035;
+  /* Surface */
+  --bg:           #000000;
+  --surface-1:    #0b0b0b;
+  --surface-2:    #111111;
+  --surface-3:    #1a1a1a;
 
-  --text-primary: #e8edf5;
-  --text-secondary: #a8b8d0;    /* was #8b9ab5 — brighter */
-  --text-muted: #6a7a98;         /* was #4a5a78 — brighter */
-  --text-label: #94a3b8;         /* new — for section labels */
+  /* Border */
+  --border:       #1e1e1e;
+  --border-mid:   #2a2a2a;
+  --border-hi:    #3a3a3a;
 
-  --accent-blue: #4f8ef7;
-  --accent-blue-dim: #1e3a6e;
-  --accent-green: #34d399;
-  --accent-green-dim: #0d3d2e;
-  --accent-yellow: #fbbf24;
-  --accent-red: #f87171;
+  /* Text */
+  --text-white:   #f5f5f5;
+  --text-primary: #d8d8d8;
+  --text-secondary:#909090;
+  --text-muted:   #555555;
+  --text-dim:     #2e2e2e;
 
-  --foreground: var(--text-primary);
+  /* Functional color — used ONLY for risk data and status indicators */
+  --risk-critical:  #ff3b3b;
+  --risk-high:      #ff7a00;
+  --risk-moderate:  #d4c000;
+  --risk-favorable: #00c060;
+  --risk-strong:    #00e87a;
+  --risk-error:     #ff4444;
+  --risk-warn:      #ffaa00;
+  --risk-ok:        #00cc55;
+
+  /* Typography */
+  --font-ui:   system-ui, -apple-system, sans-serif;
 }
+
+/* ── Reset ──────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html { background: var(--bg); }
 
 body {
-  background: var(--background);
+  background: var(--bg);
   color: var(--text-primary);
-  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Override Tailwind grays globally to use our scale */
-.text-gray-300 { color: var(--text-secondary) !important; }
-.text-gray-400 { color: var(--text-label) !important; }
-.text-gray-500 { color: var(--text-muted) !important; }
-.text-gray-600 { color: #576a88 !important; }
+/* ── Typography utilities ───────────────────────────────────────────────── */
+.font-serif  { font-family: var(--font-serif), Georgia, serif; }
+.font-mono   { font-family: var(--font-mono), 'Courier New', monospace; }
 
-/* Ensure stat values are always fully bright */
-.font-bold.font-mono { color: var(--text-primary); }
-
-.probabilis-shell {
-  position: relative;
-  overflow: hidden;
-  background:
-    radial-gradient(circle at top right, rgba(79, 142, 247, 0.12), transparent 28%),
-    radial-gradient(circle at top left, rgba(52, 211, 153, 0.08), transparent 22%),
-    var(--background);
-}
-
-.ambient-grid {
-  position: fixed;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
-  background-size: 36px 36px;
-  mask-image: linear-gradient(180deg, rgba(255, 255, 255, 0.32), transparent 90%);
-  pointer-events: none;
-}
-
-.probabilis-panel {
-  position: relative;
-  border-radius: 28px;
-  border: 1px solid var(--border);
-  background: linear-gradient(180deg, rgba(15, 22, 35, 0.95) 0%, rgba(10, 15, 26, 0.92) 100%);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.22);
-  backdrop-filter: blur(18px);
-}
-
-.hero-title {
-  font-family: var(--font-newsreader), serif;
-  font-size: clamp(2.8rem, 7vw, 5rem);
-  line-height: 0.95;
-  letter-spacing: -0.04em;
-}
-
-.eyebrow,
-.phase-pill,
-.nav-chip,
-.sample-chip,
-.mini-stat,
-.status-pill,
-.outline-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  padding: 0.45rem 0.85rem;
-  font-size: 0.75rem;
-  line-height: 1;
-}
-
-.eyebrow,
-.phase-pill {
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text-secondary);
-  letter-spacing: 0.14em;
+/* Section label — looks like a LaTeX \subsection header */
+.section-label {
+  font-family: var(--font-serif), Georgia, serif;
+  font-size: 10px;
+  font-weight: 400;
+  font-style: italic;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-}
-
-.phase-pill {
-  color: var(--accent-yellow);
-}
-
-.nav-chip,
-.sample-chip,
-.mini-stat,
-.outline-pill {
-  background: rgba(255, 255, 255, 0.03);
   color: var(--text-secondary);
 }
 
-.nav-chip:hover,
-.sample-chip:hover {
-  border-color: #35527b;
-  color: var(--text-primary);
-}
-
-.section-kicker {
-  margin-bottom: 0.45rem;
-  font-size: 0.72rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--accent-blue);
-}
-
-.field-shell {
-  border-radius: 18px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--text-primary);
-  padding: 0.95rem 1rem;
-  outline: none;
-}
-
-.field-shell:focus {
-  border-color: #35527b;
-}
-
-.field-inline {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  color: var(--text-secondary);
-  font-size: 0.92rem;
-}
-
-.toggle-row {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.65rem;
-  color: var(--text-secondary);
-  font-size: 0.92rem;
-}
-
-.primary-button,
-.secondary-button {
-  border-radius: 999px;
-  padding: 0.9rem 1.2rem;
-  font-weight: 600;
-  transition: opacity 120ms ease, transform 120ms ease;
-}
-
-.primary-button {
-  background: var(--accent-blue);
-  color: #08111a;
-}
-
-.secondary-button {
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--text-primary);
-}
-
-.primary-button:hover,
-.secondary-button:hover {
-  opacity: 0.92;
-}
-
-.primary-button:disabled,
-.secondary-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.metric-card {
-  border-radius: 24px;
-  border: 1px solid var(--border-subtle);
-  background: rgba(255, 255, 255, 0.03);
-  padding: 1rem 1.05rem;
-}
-
-.metric-label {
-  font-size: 0.72rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.metric-value {
-  margin-top: 0.7rem;
-  font-size: 1.35rem;
+/* Stat value — large monospace number */
+.stat-value {
+  font-family: var(--font-mono), 'Courier New', monospace;
+  font-size: 26px;
   font-weight: 700;
+  color: var(--text-white);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.stat-value-sm {
+  font-family: var(--font-mono), 'Courier New', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-white);
+  letter-spacing: -0.01em;
+}
+
+/* ── Cards — zero border-radius, academic table feel ───────────────────── */
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  padding: 16px;
+}
+
+.card-inset {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  padding: 12px;
+}
+
+/* ── Rule — thin horizontal divider ────────────────────────────────────── */
+.rule {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0;
+}
+
+/* ── Input / Textarea ───────────────────────────────────────────────────── */
+textarea, input[type="range"] { outline: none; }
+
+textarea {
+  background: var(--surface-2);
+  border: 1px solid var(--border-mid);
   color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  resize: vertical;
+  transition: border-color 120ms;
+}
+textarea::placeholder { color: var(--text-muted); }
+textarea:focus { border-color: var(--border-hi); }
+
+/* Range slider */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 1px;
+  background: var(--border-hi);
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  background: var(--text-white);
+  border: none;
+  cursor: pointer;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  background: var(--text-white);
+  border: none;
+  cursor: pointer;
 }
 
-.metric-detail {
-  margin-top: 0.45rem;
-  font-size: 0.9rem;
-  line-height: 1.5;
-  color: var(--text-secondary);
-}
+/* ── Buttons ────────────────────────────────────────────────────────────── */
+button { cursor: pointer; transition: opacity 120ms, background 120ms; }
+button:disabled { opacity: 0.35; cursor: not-allowed; }
 
-.assumption-card {
+.btn-primary {
+  background: var(--text-white);
+  color: #000;
+  border: none;
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 10px 20px;
   display: block;
   width: 100%;
-  border-radius: 24px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.03);
-  padding: 1rem;
-  transition: border-color 120ms ease, transform 120ms ease, background 120ms ease;
+  text-align: center;
+}
+.btn-primary:not(:disabled):hover { background: var(--text-primary); }
+
+.btn-outline {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-mid);
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  padding: 6px 14px;
+}
+.btn-outline:not(:disabled):hover {
+  border-color: var(--border-hi);
+  color: var(--text-primary);
 }
 
-.assumption-card:hover,
-.assumption-card-active {
-  border-color: #3b5f90;
-  background: rgba(79, 142, 247, 0.06);
+.btn-ghost {
+  background: transparent;
+  border: none;
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+  padding: 4px 0;
+  letter-spacing: 0.04em;
+}
+.btn-ghost:hover { color: var(--text-secondary); }
+
+/* ── Recharts overrides ─────────────────────────────────────────────────── */
+.recharts-tooltip-wrapper { pointer-events: none; }
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke: var(--surface-3);
+  stroke-dasharray: none;
 }
 
-.status-pill {
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-}
+/* ── Scrollbar ──────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--surface-3); }
 
-.status-green {
-  border-color: #145c47;
-  background: rgba(52, 211, 153, 0.12);
-  color: #7ce5bf;
+/* ── Tooltip group utility ──────────────────────────────────────────────── */
+.tooltip-group { position: relative; }
+.tooltip-content {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface-3);
+  border: 1px solid var(--border-mid);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-family: var(--font-ui);
+  padding: 6px 10px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms;
+  z-index: 50;
 }
-
-.status-amber {
-  border-color: #7a5819;
-  background: rgba(251, 191, 36, 0.12);
-  color: #ffd87d;
-}
-
-.status-red {
-  border-color: #7e3a34;
-  background: rgba(248, 113, 113, 0.12);
-  color: #ffaea2;
-}
+.tooltip-group:hover .tooltip-content { opacity: 1; }

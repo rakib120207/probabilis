@@ -1,6 +1,9 @@
 // lib/storage.ts
 // Scenario persistence via browser localStorage.
 // All data stays on the user's machine — no server storage.
+//
+// Change: added aleatory_fraction and epistemic_fraction to StoredScenario.result
+// so that the LaTeX export uses actual computed values instead of hardcoded 0.6/0.4.
 
 const HISTORY_KEY = "probabilis_history_v1";
 
@@ -19,6 +22,8 @@ export type StoredScenario = {
     eviu: number;
     uncertainty_type: string;
     variance_reduction_pct: number;
+    aleatory_fraction?: number;   // actual computed fraction from simulation
+    epistemic_fraction?: number;  // actual computed fraction from simulation
   };
   extractionMode: string;
   timestamp: string;
@@ -37,13 +42,15 @@ export function loadHistory(): StoredScenario[] {
 export function saveToHistory(entry: StoredScenario): void {
   try {
     const existing = loadHistory();
-    const updated = [entry, ...existing].slice(0, 5);
+    const updated = [entry, ...existing].slice(0, 20);
     localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
   } catch {}
 }
 
 export function clearHistory(): void {
-  localStorage.removeItem(HISTORY_KEY);
+  try {
+    localStorage.removeItem(HISTORY_KEY);
+  } catch {}
 }
 
 export function exportSession(scenarios: StoredScenario[]): void {
@@ -55,7 +62,7 @@ export function exportSession(scenarios: StoredScenario[]): void {
       distribution: "Beta",
       sampling: "Monte Carlo with antithetic variates (Hammersley & Handscomb, 1964)",
       convergence: "Gelman-Rubin R-hat (Gelman & Rubin, 1992)",
-      uncertainty_decomposition: "Der Kiureghian & Ditlevsen (2009)",
+      uncertainty_decomposition: "Der Kiureghian & Ditlevsen (2009) — semantic + mathematical blend",
     },
     scenarios,
   };

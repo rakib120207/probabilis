@@ -3,15 +3,8 @@
 import Link from "next/link";
 import { useState, useEffect, useRef, useMemo } from "react";
 import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ReferenceLine,
-  ReferenceArea,
-  ResponsiveContainer,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
+  ReferenceLine, ReferenceArea, ResponsiveContainer,
 } from "recharts";
 import { buildLocalCurve } from "@/lib/betaPdf";
 import { saveToHistory, StoredScenario } from "@/lib/storage";
@@ -23,14 +16,6 @@ type ExtractionResult = {
   suggested_confidence: number;
   reasoning: string;
   extraction_mode: string;
-};
-
-type ChartPoint = {
-  x?: number;
-  probability?: number;
-  density?: number;
-  densityA?: number;
-  densityB?: number;
 };
 
 type SimulationResult = {
@@ -45,22 +30,17 @@ type SimulationResult = {
   rhat?: number;
   converged?: boolean;
   variance_reduction_pct?: number;
-  aleatory_variance?: number;
-  epistemic_variance?: number;
   aleatory_fraction?: number;
   epistemic_fraction?: number;
   uncertainty_type?: string;
   eviu?: number;
+  distribution_type?: string; // new
+  risk_adjusted_mean?: number; // new
 };
 
 type SensitivityResult = {
   probability_sensitivity: number;
   confidence_sensitivity: number;
-  prob_output_low: number;
-  prob_output_high: number;
-  conf_output_low: number;
-  conf_output_high: number;
-  dominant_factor: string;
   probability_impact: number;
   confidence_impact: number;
   interpretation: string;
@@ -105,7 +85,6 @@ type InterpretationResult = {
 
 type StressPoint = {
   shift_pp: number;
-  probability: number;
   mean: number;
   ci_low: number;
   ci_high: number;
@@ -113,7 +92,6 @@ type StressPoint = {
 };
 
 type StressResult = {
-  base_mean: number;
   stress_points: StressPoint[];
   fragility_frontier_pp: number | null;
   robust_range_pp: number;
@@ -143,26 +121,48 @@ type PortfolioResult = {
     overlap: number;
     mean_gap: number;
   }[];
-  portfolio_spread: number;
   recommendation_basis: string;
   highest_upside: string;
   lowest_downside: string;
 };
 
+type ChartPoint = {
+  x?: number;
+  probability?: number;
+  density?: number;
+  densityA?: number;
+  densityB?: number;
+};
+
+// ── New types for v2.0 ─────────────────────────────────────────────────────
+export type RiskFactor = {
+  name: string;
+  probability: number;
+  confidence: number;
+};
+
+export type CopulaResult = {
+  mean: number;
+  std_dev: number;
+  confidence_interval_low: number;
+  confidence_interval_high: number;
+  tail_risk_5pct: number;
+  tail_risk_95pct: number;
+  joint_failure_probability: number;
+  correlation_effect: number;
+  histogram_x: number[];
+  histogram_y: number[];
+  trials: number;
+  risk_factor_names: string[];
+  copula_type: string;
+};
+
 // ── Utilities ──────────────────────────────────────────────────────────────
 
-function interpolateDensity(
-  xPct: number,
-  histX: number[],
-  histY: number[]
-): number {
+function interpolateDensity(xPct: number, histX: number[], histY: number[]): number {
   const xProb = xPct / 100;
   const margin = ((histX[histX.length - 1] - histX[0]) / histX.length) * 2;
-  if (
-    xProb < histX[0] - margin ||
-    xProb > histX[histX.length - 1] + margin
-  )
-    return 0;
+  if (xProb < histX[0] - margin || xProb > histX[histX.length - 1] + margin) return 0;
   for (let i = 0; i < histX.length - 1; i++) {
     if (xProb >= histX[i] && xProb <= histX[i + 1]) {
       const t = (xProb - histX[i]) / (histX[i + 1] - histX[i]);
@@ -172,32 +172,403 @@ function interpolateDensity(
   return 0;
 }
 
-function buildComparisonData(
-  resultA: SimulationResult,
-  resultB: SimulationResult | null
-) {
-  return Array.from({ length: 101 }, (_, xPct) => ({
-    x: xPct,
-    densityA: interpolateDensity(xPct, resultA.histogram_x, resultA.histogram_y),
-    densityB: resultB
-      ? interpolateDensity(xPct, resultB.histogram_x, resultB.histogram_y)
-      : undefined,
+function buildComparisonData(a: SimulationResult, b: SimulationResult | null) {
+  return Array.from({ length: 101 }, (_, x) => ({
+    x,
+    densityA: interpolateDensity(x, a.histogram_x, a.histogram_y),
+    densityB: b ? interpolateDensity(x, b.histogram_x, b.histogram_y) : undefined,
   }));
 }
 
-function recomputeFromAssumptions(
-  list: Assumption[],
-  weights: Record<string, number>
-): number {
-  let prob = 0.5;
+function recomputeFromAssumptions(list: Assumption[], w: Record<string, number>): number {
+  let p = 0.5;
   list.forEach((a) => {
-    const w = weights[a.id] ?? a.weight;
-    prob += a.direction === "positive" ? w * 0.12 : -(w * 0.12);
+    const weight = w[a.id] ?? a.weight;
+    p += a.direction === "positive" ? weight * 0.12 : -(weight * 0.12);
   });
-  return Math.max(0.05, Math.min(0.95, Math.round(prob * 100) / 100));
+  return Math.max(0.05, Math.min(0.95, Math.round(p * 100) / 100));
 }
 
-// ── Component ──────────────────────────────────────────────────────────────
+const RISK_COLORS: Record<string, string> = {
+  critical: "#ff3b3b",
+  high: "#ff7a00",
+  moderate: "#d4c000",
+  favorable: "#00c060",
+  strong: "#00e87a",
+};
+
+// ── Sub-components ─────────────────────────────────────────────────────────
+
+function Label({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="section-label" style={{ marginBottom: 10 }}>
+      {children}
+    </p>
+  );
+}
+
+function HR() {
+  return <div className="rule" style={{ margin: "20px 0" }} />;
+}
+
+// ── New v2.0 Components ────────────────────────────────────────────────────
+
+function RiskSliderSection({
+  risk,
+  setRisk,
+}: {
+  risk: number;
+  setRisk: (v: number) => void;
+}) {
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+          Identified Risk{" "}
+          <span className="font-mono" style={{ fontSize: 10 }}>
+            (p_adj = base × (1 − risk))
+          </span>
+        </span>
+        <span
+          className="font-mono"
+          style={{
+            fontSize: 14,
+            fontWeight: 700,
+            color: risk > 0.3 ? "var(--risk-high)" : risk > 0.1 ? "var(--risk-moderate)" : "var(--text-white)",
+          }}
+        >
+          {(risk * 100).toFixed(0)}%
+        </span>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={0.95}
+        step={0.01}
+        value={risk}
+        onChange={(e) => setRisk(parseFloat(e.target.value))}
+      />
+      <p className="font-mono" style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 6 }}>
+        {risk > 0
+          ? `Adjusted p₀ = ${((1 - risk) * 100).toFixed(0)}% of stated base probability`
+          : "No risk adjustment applied — base probability used directly"}
+      </p>
+    </div>
+  );
+}
+
+function DistributionBadge({ distributionType }: { distributionType?: string }) {
+  if (!distributionType) return null;
+  const labels: Record<string, string> = {
+    beta: "β Beta",
+    lognormal: "LogN Log-Normal",
+    poisson: "λ Poisson",
+    gamma: "Γ Gamma",
+  };
+  return (
+    <div
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "3px 10px",
+        border: "1px solid var(--border-hi)",
+        background: "var(--surface-2)",
+        marginBottom: 16,
+      }}
+    >
+      <span className="font-mono" style={{ fontSize: 9, color: "var(--text-muted)", letterSpacing: "0.1em" }}>
+        DISTRIBUTION:
+      </span>
+      <span className="font-mono" style={{ fontSize: 10, fontWeight: 700, color: "var(--text-white)", letterSpacing: "0.06em" }}>
+        {labels[distributionType] ?? distributionType.toUpperCase()}
+      </span>
+    </div>
+  );
+}
+
+function RiskAdjustmentDisplay({
+  base,
+  adjusted,
+  risk,
+}: {
+  base: number;
+  adjusted: number;
+  risk: number;
+}) {
+  if (risk === 0) return null;
+  return (
+    <div
+      style={{
+        padding: "10px 14px",
+        border: "1px solid var(--border)",
+        background: "var(--surface-1)",
+        marginBottom: 16,
+      }}
+    >
+      <p className="font-mono" style={{ fontSize: 9, color: "var(--text-muted)", letterSpacing: "0.12em", marginBottom: 8 }}>
+        RISK ADJUSTMENT
+      </p>
+      <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+        <span className="font-mono" style={{ fontSize: 13, color: "var(--text-muted)" }}>
+          {(base * 100).toFixed(0)}% base
+        </span>
+        <span style={{ color: "var(--text-muted)" }}>×</span>
+        <span className="font-mono" style={{ fontSize: 13, color: "var(--risk-critical)" }}>
+          (1 − {(risk * 100).toFixed(0)}% risk)
+        </span>
+        <span style={{ color: "var(--text-muted)" }}>=</span>
+        <span className="font-mono" style={{ fontSize: 16, fontWeight: 700, color: "var(--text-white)" }}>
+          {(adjusted * 100).toFixed(1)}% adjusted
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function CopulaPanel({
+  apiUrl,
+  baseProbability,
+}: {
+  apiUrl: string;
+  baseProbability: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [factors, setFactors] = useState<RiskFactor[]>([
+    { name: "Risk Factor 1", probability: 0.25, confidence: 0.60 },
+    { name: "Risk Factor 2", probability: 0.20, confidence: 0.70 },
+  ]);
+  const [correlation, setCorrelation] = useState(0.4);
+  const [result, setResult] = useState<CopulaResult | null>(null);
+  const [running, setRunning] = useState(false);
+
+  async function runCopula() {
+    setRunning(true);
+    try {
+      const n = factors.length;
+      const corr = Array.from({ length: n }, (_, i) =>
+        Array.from({ length: n }, (_, j) => (i === j ? 1.0 : correlation))
+      );
+      const res = await fetch(`${apiUrl}/copula`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          description: "Correlated risk analysis",
+          base_probability: baseProbability,
+          risk_factors: factors,
+          correlation_matrix: corr,
+          trials: 10000,
+        }),
+      });
+      if (res.ok) setResult(await res.json());
+    } catch {}
+    setRunning(false);
+  }
+
+  return (
+    <div style={{ marginBottom: 28 }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          width: "100%",
+          fontFamily: "monospace",
+          fontSize: 10,
+          letterSpacing: "0.08em",
+          background: "transparent",
+          border: "1px solid var(--border-mid)",
+          color: "var(--text-muted)",
+          padding: "8px 14px",
+          cursor: "pointer",
+          textAlign: "left",
+          display: "flex",
+          justifyContent: "space-between",
+        }}
+      >
+        <span>⊕ CORRELATED RISK ANALYSIS — Gaussian Copula</span>
+        <span>{open ? "▾" : "▸"}</span>
+      </button>
+
+      {open && (
+        <div
+          style={{
+            border: "1px solid var(--border)",
+            borderTop: "none",
+            padding: "14px",
+            background: "var(--surface-1)",
+          }}
+        >
+          <p
+            style={{
+              fontFamily: "Georgia, serif",
+              fontSize: 12,
+              fontStyle: "italic",
+              color: "var(--text-muted)",
+              marginBottom: 14,
+              lineHeight: 1.6,
+            }}
+          >
+            Models correlated risks via Gaussian copula. Bad events cluster — market crashes make all
+            risks more likely simultaneously. Without copulas, tail risk is underestimated.
+          </p>
+
+          {factors.map((f, i) => (
+            <div key={i} style={{ marginBottom: 12, padding: "10px", background: "var(--surface-2)" }}>
+              <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+                <input
+                  value={f.name}
+                  onChange={(e) => {
+                    const updated = [...factors];
+                    updated[i] = { ...f, name: e.target.value };
+                    setFactors(updated);
+                  }}
+                  style={{
+                    flex: 1,
+                    fontFamily: "monospace",
+                    fontSize: 11,
+                    background: "var(--surface-3)",
+                    border: "1px solid var(--border)",
+                    color: "var(--text-primary)",
+                    padding: "4px 8px",
+                  }}
+                />
+                <button
+                  onClick={() => setFactors(factors.filter((_, fi) => fi !== i))}
+                  style={{
+                    fontFamily: "monospace",
+                    fontSize: 10,
+                    background: "none",
+                    border: "none",
+                    color: "var(--text-muted)",
+                    cursor: "pointer",
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+              <div style={{ display: "flex", gap: 16, fontSize: 11 }}>
+                <span style={{ color: "var(--text-muted)", fontFamily: "monospace" }}>
+                  p={`${(f.probability * 100).toFixed(0)}`}%{" "}
+                </span>
+                <input
+                  type="range"
+                  min={0.01}
+                  max={0.95}
+                  step={0.01}
+                  value={f.probability}
+                  onChange={(e) => {
+                    const updated = [...factors];
+                    updated[i] = { ...f, probability: parseFloat(e.target.value) };
+                    setFactors(updated);
+                  }}
+                  style={{ flex: 1 }}
+                />
+              </div>
+            </div>
+          ))}
+
+          {factors.length < 4 && (
+            <button
+              onClick={() =>
+                setFactors([
+                  ...factors,
+                  { name: `Risk Factor ${factors.length + 1}`, probability: 0.2, confidence: 0.65 },
+                ])
+              }
+              style={{
+                fontFamily: "monospace",
+                fontSize: 9,
+                background: "none",
+                border: "1px solid var(--border-mid)",
+                color: "var(--text-muted)",
+                padding: "4px 12px",
+                cursor: "pointer",
+                marginBottom: 12,
+              }}
+            >
+              + add risk factor
+            </button>
+          )}
+
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+              <span style={{ fontFamily: "monospace", fontSize: 10, color: "var(--text-muted)" }}>
+                Inter-risk correlation
+              </span>
+              <span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 700, color: "var(--text-white)" }}>
+                ρ = {correlation.toFixed(2)}
+              </span>
+            </div>
+            <input
+              type="range"
+              min={-0.8}
+              max={0.95}
+              step={0.05}
+              value={correlation}
+              onChange={(e) => setCorrelation(parseFloat(e.target.value))}
+            />
+          </div>
+
+          <button
+            onClick={runCopula}
+            disabled={running || factors.length < 2}
+            style={{
+              fontFamily: "monospace",
+              fontSize: 10,
+              letterSpacing: "0.08em",
+              background: "var(--text-white)",
+              color: "#000",
+              border: "none",
+              padding: "8px 16px",
+              width: "100%",
+              cursor: "pointer",
+              opacity: running || factors.length < 2 ? 0.35 : 1,
+            }}
+          >
+            {running ? "RUNNING COPULA SIMULATION..." : "RUN CORRELATED SIMULATION"}
+          </button>
+
+          {result && (
+            <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1, background: "var(--border)" }}>
+                {[
+                  { label: "Mean (correlated)", value: `${(result.mean * 100).toFixed(1)}%` },
+                  { label: "5th percentile (worst)", value: `${(result.tail_risk_5pct * 100).toFixed(1)}%` },
+                  { label: "Joint failure P", value: `${(result.joint_failure_probability * 100).toFixed(1)}%` },
+                  { label: "Correlation effect", value: `${(result.correlation_effect * 100).toFixed(1)}pp` },
+                ].map((s) => (
+                  <div key={s.label} style={{ background: "var(--surface-2)", padding: "10px 12px", textAlign: "center" }}>
+                    <p style={{ fontFamily: "monospace", fontSize: 14, fontWeight: 700, color: "var(--text-white)", margin: 0 }}>
+                      {s.value}
+                    </p>
+                    <p
+                      style={{
+                        fontFamily: "Georgia, serif",
+                        fontSize: 9,
+                        fontStyle: "italic",
+                        color: "var(--text-muted)",
+                        marginTop: 4,
+                      }}
+                    >
+                      {s.label}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              {result.correlation_effect > 0.01 && (
+                <p style={{ fontFamily: "Georgia, serif", fontSize: 12, fontStyle: "italic", color: "var(--risk-high)", lineHeight: 1.6 }}>
+                  ↳ Correlation inflates downside risk by {(result.correlation_effect * 100).toFixed(1)}pp vs independent assumption. Tail
+                  events cluster.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main Component ─────────────────────────────────────────────────────────
 
 export default function Home() {
   const SESSION_KEY = "probabilis_session_v1";
@@ -210,11 +581,11 @@ export default function Home() {
   }, []);
 
   // ── State ────────────────────────────────────────────────────────────────
-  const [description, setDescription] = useState<string>("");
-  const [baseProbability, setBaseProbability] = useState<number>(0.5);
-  const [confidence, setConfidence] = useState<number>(0.5);
-  const [reasoning, setReasoning] = useState<string>("");
-  const [extractionMode, setExtractionMode] = useState<string>("");
+  const [description, setDescription] = useState("");
+  const [baseProbability, setBaseProbability] = useState(0.5);
+  const [confidence, setConfidence] = useState(0.5);
+  const [reasoning, setReasoning] = useState("");
+  const [extractionMode, setExtractionMode] = useState("");
   const [reasoningFresh, setReasoningFresh] = useState(false);
 
   const [result, setResult] = useState<SimulationResult | null>(null);
@@ -239,64 +610,56 @@ export default function Home() {
   const [error, setError] = useState("");
   const [analyzeStatus, setAnalyzeStatus] = useState("");
 
-  const abortControllerRef = useRef<AbortController | null>(null);
+  // ── New state for v2.0 ──────────────────────────────────────────────────
+  const [risk, setRisk] = useState<number>(0.0);
 
-  // ── Restore session + history on mount ───────────────────────────────────
+  const abortRef = useRef<AbortController | null>(null);
+
+  // ── Init ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     try {
-      const rawSession = localStorage.getItem(SESSION_KEY);
-      if (rawSession) {
-        const s = JSON.parse(rawSession);
-        setDescription(s.description ?? "");
-        setBaseProbability(s.baseProbability ?? 0.5);
-        setConfidence(s.confidence ?? 0.5);
-        // Reasoning is intentionally NOT restored — reasoningFresh gate prevents
-        // the AI interpretation box from appearing on return from model-card.
-        setExtractionMode(s.extractionMode ?? "");
-      }
+      const s = JSON.parse(localStorage.getItem(SESSION_KEY) ?? "{}");
+      if (s.description) setDescription(s.description);
+      if (s.baseProbability) setBaseProbability(s.baseProbability);
+      if (s.confidence) setConfidence(s.confidence);
+      if (s.extractionMode) setExtractionMode(s.extractionMode);
     } catch {}
-
     try {
-      const rawHistory = localStorage.getItem(HISTORY_KEY);
-      setHistory(rawHistory ? JSON.parse(rawHistory) : []);
-    } catch {
-      setHistory([]);
-    }
+      const raw = localStorage.getItem(HISTORY_KEY);
+      setHistory(raw ? JSON.parse(raw) : []);
+    } catch {}
+    fetch(`${API_URL}/health`).catch(() => {});
+    return () => {
+      abortRef.current?.abort();
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Save session on relevant state changes ───────────────────────────────
+  // ── Session persistence ───────────────────────────────────────────────────
   useEffect(() => {
     if (!description && !result) return;
     try {
       localStorage.setItem(
         SESSION_KEY,
-        JSON.stringify({ description, baseProbability, confidence, reasoning, extractionMode })
+        JSON.stringify({
+          description,
+          baseProbability,
+          confidence,
+          reasoning,
+          extractionMode,
+        })
       );
     } catch {}
   }, [description, baseProbability, confidence, reasoning, extractionMode, result, SESSION_KEY]);
 
-  // ── Wake Railway on mount ────────────────────────────────────────────────
-  useEffect(() => {
-    fetch(`${API_URL}/health`).catch(() => {});
-  }, [API_URL]);
-
-  // ── Cleanup on unmount ───────────────────────────────────────────────────
-  useEffect(() => {
-    return () => {
-      abortControllerRef.current?.abort();
-    };
-  }, []);
-
-  // ── Analyze ──────────────────────────────────────────────────────────────
+  // ── Analyze ───────────────────────────────────────────────────────────────
   async function analyzeScenario() {
     if (!description.trim()) return;
-
-    abortControllerRef.current?.abort();
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
 
     setExtracting(true);
-    setAnalyzeStatus("Connecting to AI...");
+    setAnalyzeStatus("connecting to AI...");
     setReasoning("");
     setReasoningFresh(false);
     setResult(null);
@@ -307,59 +670,52 @@ export default function Home() {
     setAssumptions(null);
     setError("");
 
-    const statusTimer = setTimeout(
-      () => setAnalyzeStatus("Analyzing uncertainty signals..."),
-      1500
-    );
+    const timer = setTimeout(() => setAnalyzeStatus("analyzing uncertainty signals..."), 1500);
 
     try {
       const res = await fetch(`${API_URL}/extract`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ description }),
-        signal: controller.signal,
+        signal: ctrl.signal,
       });
       if (!res.ok) throw new Error(`${res.status}`);
       const data: ExtractionResult = await res.json();
-
       setBaseProbability(data.suggested_probability);
       setConfidence(data.suggested_confidence);
       setReasoning(data.reasoning);
       setReasoningFresh(true);
       setExtractionMode(data.extraction_mode);
 
-      // Assumptions — sequential after extraction settles
       try {
-        const assumpRes = await fetch(`${API_URL}/assumptions`, {
+        const ar = await fetch(`${API_URL}/assumptions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ description }),
-          signal: controller.signal,
+          signal: ctrl.signal,
         });
-        if (assumpRes.ok) {
-          const assumpData: AssumptionsResult = await assumpRes.json();
-          setAssumptions(assumpData);
+        if (ar.ok) {
+          const ad: AssumptionsResult = await ar.json();
+          setAssumptions(ad);
           const w: Record<string, number> = {};
-          assumpData.assumptions.forEach((a) => {
+          ad.assumptions.forEach((a) => {
             w[a.id] = a.weight;
           });
           setEditedWeights(w);
         }
       } catch {}
-    } catch (err) {
-      if ((err as Error).name !== "AbortError") {
-        setError("Analysis failed. Check your backend is running.");
-      }
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") setError("Analysis failed. Is your backend running?");
     } finally {
-      clearTimeout(statusTimer);
+      clearTimeout(timer);
       setAnalyzeStatus("");
       setExtracting(false);
     }
   }
 
-  // ── Simulate ─────────────────────────────────────────────────────────────
+  // ── Simulate ──────────────────────────────────────────────────────────────
   async function runSimulation() {
-    abortControllerRef.current?.abort();
+    abortRef.current?.abort();
     setSimulating(true);
     setError("");
 
@@ -371,18 +727,18 @@ export default function Home() {
           description,
           base_probability: baseProbability,
           confidence,
+          risk: risk, // new
           trials: 10000,
+          beta_scale: 50, // increased from 20 for v2.0
         }),
       });
       if (!res.ok) throw new Error(`${res.status}`);
       const data: SimulationResult = await res.json();
       setResult(data);
 
-      // Save to history — unique ID prevents duplicate key React warning
       const entry: StoredScenario = {
         id: Date.now() * 1000 + Math.floor(Math.random() * 1000),
-        description:
-          description.slice(0, 120) + (description.length > 120 ? "..." : ""),
+        description: description.slice(0, 120) + (description.length > 120 ? "..." : ""),
         baseProbability,
         confidence,
         result: {
@@ -391,7 +747,7 @@ export default function Home() {
           confidence_interval_low: data.confidence_interval_low,
           confidence_interval_high: data.confidence_interval_high,
           trials: data.trials,
-          rhat: data.rhat ?? 1.0,
+          rhat: data.rhat ?? 1,
           eviu: data.eviu ?? 0,
           uncertainty_type: data.uncertainty_type ?? "aleatory-dominant",
           variance_reduction_pct: data.variance_reduction_pct ?? 0,
@@ -400,39 +756,31 @@ export default function Home() {
         timestamp: new Date().toLocaleTimeString(),
         isoDate: new Date().toISOString(),
       };
-
-      const updatedHistory = [entry, ...history].slice(0, 20);
+      const updated = [entry, ...history].slice(0, 20);
       saveToHistory(entry);
-      setHistory(updatedHistory);
+      setHistory(updated);
 
-      // Enrichment calls — sequential to prevent simultaneous setState storms
+      // Enrichment — sequential
       try {
-        const sensitivityRes = await fetch(`${API_URL}/sensitivity`, {
+        const sr = await fetch(`${API_URL}/sensitivity`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            base_probability: baseProbability,
-            confidence,
-            trials: 3000,
-          }),
+          body: JSON.stringify({ base_probability: baseProbability, confidence, trials: 3000 }),
         });
-        if (sensitivityRes.ok) setSensitivity(await sensitivityRes.json());
+        if (sr.ok) setSensitivity(await sr.json());
       } catch {}
 
       try {
-        const stressRes = await fetch(`${API_URL}/stress`, {
+        const str = await fetch(`${API_URL}/stress`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            base_probability: baseProbability,
-            confidence,
-          }),
+          body: JSON.stringify({ base_probability: baseProbability, confidence }),
         });
-        if (stressRes.ok) setStressResult(await stressRes.json());
+        if (str.ok) setStressResult(await str.json());
       } catch {}
 
       try {
-        const interpRes = await fetch(`${API_URL}/interpret`, {
+        const ir = await fetch(`${API_URL}/interpret`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -441,18 +789,18 @@ export default function Home() {
             std_dev: data.std_dev,
             confidence_interval_low: data.confidence_interval_low,
             confidence_interval_high: data.confidence_interval_high,
-            rhat: data.rhat ?? 1.0,
+            rhat: data.rhat ?? 1,
             eviu: data.eviu ?? 0,
             uncertainty_type: data.uncertainty_type ?? "aleatory-dominant",
             aleatory_fraction: data.aleatory_fraction ?? 0.6,
             epistemic_fraction: data.epistemic_fraction ?? 0.4,
           }),
         });
-        if (interpRes.ok) setInterpretation(await interpRes.json());
+        if (ir.ok) setInterpretation(await ir.json());
       } catch {}
 
       try {
-        const summRes = await fetch(`${API_URL}/summarize`, {
+        const sumr = await fetch(`${API_URL}/summarize`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -464,7 +812,7 @@ export default function Home() {
             trials: data.trials,
           }),
         });
-        if (summRes.ok) setDecisionSummary(await summRes.json());
+        if (sumr.ok) setDecisionSummary(await sumr.json());
       } catch {}
     } catch {
       setError("Simulation failed. Check your backend connection.");
@@ -473,51 +821,41 @@ export default function Home() {
     }
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-  const liveChartData = buildLocalCurve(baseProbability, confidence);
-
-  function exportSessionJSON(hist: StoredScenario[]) {
-    const payload = {
-      tool: "Probabilis",
-      version: "1.0",
-      exported_at: new Date().toISOString(),
-      methodology: {
-        distribution: "Beta",
-        sampling: "Monte Carlo with antithetic variates (Hammersley & Handscomb, 1964)",
-        convergence: "Gelman-Rubin R-hat (Gelman & Rubin, 1992)",
-        uncertainty_decomposition: "Der Kiureghian & Ditlevsen (2009)",
-      },
-      scenarios: hist.map((e) => ({
-        description: e.description,
-        base_probability: e.baseProbability,
-        confidence: e.confidence,
-        mean: e.result.mean,
-        std_dev: e.result.std_dev,
-        confidence_interval_low: e.result.confidence_interval_low,
-        confidence_interval_high: e.result.confidence_interval_high,
-        trials: e.result.trials,
-        rhat: e.result.rhat,
-        eviu: e.result.eviu,
-        uncertainty_type: e.result.uncertainty_type,
-        variance_reduction_pct: e.result.variance_reduction_pct,
-        extraction_mode: e.extractionMode,
-        timestamp: e.timestamp,
-        iso_date: e.isoDate,
-      })),
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
+  // ── Export helpers ────────────────────────────────────────────────────────
+  function exportJSON(hist: StoredScenario[]) {
+    const blob = new Blob(
+      [
+        JSON.stringify(
+          {
+            tool: "Probabilis",
+            version: "1.0",
+            exported_at: new Date().toISOString(),
+            methodology: {
+              distribution: "Beta",
+              sampling: "Antithetic variates Monte Carlo (Hammersley & Handscomb, 1964)",
+              convergence: "Gelman-Rubin R-hat (Gelman & Rubin, 1992)",
+              uncertainty_decomposition: "Der Kiureghian & Ditlevsen (2009)",
+            },
+            scenarios: hist.map((e) => ({
+              ...e.result,
+              description: e.description,
+              extraction_mode: e.extractionMode,
+            })),
+          },
+          null,
+          2
+        ),
+      ],
+      { type: "application/json" }
+    );
     const a = document.createElement("a");
-    a.href = url;
+    a.href = URL.createObjectURL(blob);
     a.download = `probabilis-${new Date().toISOString().split("T")[0]}.json`;
     a.click();
-    URL.revokeObjectURL(url);
   }
 
-  async function exportLatex(hist: StoredScenario[]) {
-    if (hist.length === 0) return;
+  async function exportLatex_FIXED(hist: StoredScenario[]) {
+    if (!hist.length) return;
     try {
       const res = await fetch(`${API_URL}/report`, {
         method: "POST",
@@ -537,8 +875,8 @@ export default function Home() {
             eviu: e.result.eviu ?? 0,
             variance_reduction_pct: e.result.variance_reduction_pct ?? 0,
             uncertainty_type: e.result.uncertainty_type ?? "aleatory-dominant",
-            aleatory_fraction: 0.6,
-            epistemic_fraction: 0.4,
+            aleatory_fraction: e.result.aleatory_fraction ?? 0.6,
+            epistemic_fraction: e.result.epistemic_fraction ?? 0.4,
             extraction_mode: e.extractionMode,
             timestamp: e.timestamp,
           })),
@@ -546,1003 +884,1054 @@ export default function Home() {
       });
       if (res.ok) {
         const data = await res.json();
-        const blob = new Blob([data.latex_source], { type: "text/plain" });
-        const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
-        a.href = url;
+        a.href = URL.createObjectURL(new Blob([data.latex_source], { type: "text/plain" }));
         a.download = `probabilis-report-${new Date().toISOString().split("T")[0]}.tex`;
         a.click();
-        URL.revokeObjectURL(url);
       }
     } catch {}
   }
 
-  function clearAllHistory() {
-    localStorage.removeItem(HISTORY_KEY);
-    setHistory([]);
-  }
+  // ── Chart data ────────────────────────────────────────────────────────────
+  const liveChartData = buildLocalCurve(baseProbability, confidence);
+  const exportLatex = exportLatex_FIXED;
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <main className="min-h-screen p-8" style={{ background: "var(--background)" }}>
-      <div className="max-w-2xl mx-auto">
-
-        {/* ── Header ─────────────────────────────────────────────────────── */}
-        <div className="mb-10">
+    <main style={{ background: "var(--bg)", minHeight: "100vh", padding: "48px 24px 80px" }}>
+      <div style={{ maxWidth: 680, margin: "0 auto" }}>
+        {/* ── Header ────────────────────────────────────────────────────── */}
+        <header style={{ marginBottom: 48 }}>
           <h1
-            className="text-3xl font-bold tracking-tight"
-            style={{ color: "var(--text-primary)" }}
+            className="font-serif"
+            style={{
+              fontSize: 32,
+              fontWeight: 400,
+              fontStyle: "italic",
+              letterSpacing: "0.02em",
+              color: "var(--text-white)",
+              margin: 0,
+            }}
           >
             Probabilis
           </h1>
-          <p className="mt-1" style={{ color: "var(--text-secondary)" }}>
-            Describe a decision. We model its uncertainty.
-          </p>
-        </div>
-
-        {/* ── Scenario Input ──────────────────────────────────────────────── */}
-        <div className="mb-4">
-          <label className="block text-sm font-medium mb-2" style={{ color: "var(--text-secondary)" }}>
-            Scenario
-          </label>
-          <textarea
-            className="w-full border rounded-lg p-3 resize-none focus:outline-none"
+          <p
+            className="font-serif"
             style={{
-              background: "var(--surface-2)",
-              borderColor: "var(--border)",
-              color: "var(--text-primary)",
+              fontSize: 12,
+              letterSpacing: "0.18em",
+              textTransform: "uppercase",
+              color: "var(--text-muted)",
+              marginTop: 4,
             }}
-            placeholder="e.g. I'm launching a new SaaS product next month. The market is competitive but we have early waitlist signups and good feedback from beta users."
+          >
+            Decision Simulation Under Uncertainty
+          </p>
+        </header>
+
+        {/* ── Scenario input ────────────────────────────────────────────── */}
+        <section style={{ marginBottom: 24 }}>
+          <Label>Scenario Description</Label>
+          <textarea
+            rows={4}
+            style={{ width: "100%", padding: "12px 14px" }}
+            placeholder="Describe your decision scenario in natural language. The system will extract uncertainty parameters automatically."
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            rows={4}
           />
+        </section>
+
+        {/* Analyze button */}
+        <div style={{ marginBottom: 32, display: "flex", alignItems: "center", gap: 16 }}>
+          <button
+            className="btn-outline"
+            onClick={analyzeScenario}
+            disabled={extracting || !description.trim()}
+            style={{ minWidth: 160 }}
+          >
+            {extracting ? `▷ ${analyzeStatus || "analyzing..."}` : "▷ Analyze with AI"}
+          </button>
+          {analyzeStatus && !extracting && (
+            <span className="font-mono" style={{ fontSize: 11, color: "var(--text-muted)" }}>
+              {analyzeStatus}
+            </span>
+          )}
         </div>
-
-        <button
-          onClick={analyzeScenario}
-          disabled={extracting || !description.trim()}
-          className="mb-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed
-                     text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors"
-        >
-          {extracting
-            ? analyzeStatus || "Analyzing..."
-            : "Analyze with AI"}
-        </button>
-
-        {analyzeStatus && !extracting && (
-          <p className="mb-4 text-xs" style={{ color: "var(--text-muted)" }}>
-            {analyzeStatus}
-          </p>
-        )}
 
         {/* ── Error ──────────────────────────────────────────────────────── */}
         {error && (
-          <div className="mb-6 p-3 rounded-lg text-sm border"
-               style={{ background: "#450a0a", borderColor: "#7f1d1d", color: "#fca5a5" }}>
-            {error}
-          </div>
-        )}
-
-        {/* ── AI Interpretation — only shows after active Analyze click ─── */}
-        {reasoning && reasoningFresh && (
           <div
-            className="mb-6 p-4 rounded-lg border"
-            style={{ background: "var(--surface-1)", borderColor: "var(--accent-blue-dim)" }}
+            className="font-mono"
+            style={{
+              marginBottom: 24,
+              padding: "10px 14px",
+              border: "1px solid var(--risk-error)",
+              color: "var(--risk-error)",
+              fontSize: 12,
+            }}
           >
-            <div className="flex items-center justify-between mb-2">
-              <p
-                className="text-xs font-semibold uppercase tracking-wider"
-                style={{ color: "var(--accent-blue)" }}
-              >
-                AI Interpretation
-              </p>
-              <span
-                className={`text-xs px-2 py-0.5 rounded-full font-medium border ${
-                  extractionMode.startsWith("ai")
-                    ? "bg-green-900/50 text-green-400 border-green-800"
-                    : "bg-yellow-900/50 text-yellow-400 border-yellow-800"
-                }`}
-              >
-                {extractionMode.startsWith("ai") ? "⚡ Llama 3.3" : "📐 Linguistic"}
-              </span>
-            </div>
-            <p className="text-sm leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-              {reasoning}
-            </p>
+            ERROR: {error}
           </div>
         )}
 
-        {/* ── Assumption Audit ────────────────────────────────────────────── */}
+        {/* ── AI Interpretation ────────────────────────────────────────── */}
+        {reasoning && reasoningFresh && (
+          <section style={{ marginBottom: 32 }}>
+            <Label>
+              Extraction Output
+              <span
+                className="font-mono"
+                style={{
+                  marginLeft: 10,
+                  fontSize: 9,
+                  color: extractionMode.startsWith("ai") ? "var(--risk-favorable)" : "var(--risk-moderate)",
+                  letterSpacing: "0.1em",
+                }}
+              >
+                [{extractionMode.startsWith("ai") ? "LLAMA 3.3 70B" : "LINGUISTIC FALLBACK"}]
+              </span>
+            </Label>
+            <div
+              style={{
+                padding: "12px 14px",
+                borderLeft: "2px solid var(--border-hi)",
+                background: "var(--surface-1)",
+              }}
+            >
+              <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: 0, lineHeight: 1.65 }}>
+                {reasoning}
+              </p>
+            </div>
+          </section>
+        )}
+
+        {/* ── Assumption Audit ──────────────────────────────────────────── */}
         {assumptions && (
-          <div className="mb-6">
+          <section style={{ marginBottom: 32 }}>
             <button
               onClick={() => setShowAssumptions(!showAssumptions)}
-              className="flex items-center gap-2 text-xs hover:opacity-80 transition-opacity mb-2"
-              style={{ color: "var(--text-label)" }}
+              style={{
+                background: "none",
+                border: "none",
+                padding: 0,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                cursor: "pointer",
+                marginBottom: showAssumptions ? 12 : 0,
+              }}
             >
-              <span>{showAssumptions ? "▼" : "▶"}</span>
-              <span className="uppercase tracking-wider">
-                Assumption Audit — {assumptions.assumptions.length} factors identified
+              <span className="font-mono" style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                {showAssumptions ? "▾" : "▸"}
+              </span>
+              <span className="section-label" style={{ marginBottom: 0 }}>
+                Assumption Audit — {assumptions.assumptions.length} factors
               </span>
             </button>
 
             {showAssumptions && (
-              <div
-                className="rounded-lg border p-4 space-y-4"
-                style={{ background: "var(--surface-1)", borderColor: "var(--border)" }}
-              >
-                <p className="text-xs leading-relaxed" style={{ color: "var(--text-muted)" }}>
-                  {assumptions.synthesis_note} Adjust weights to see how they affect the
-                  probability estimate.
+              <div className="card" style={{ marginTop: 4 }}>
+                <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16, lineHeight: 1.6 }}>
+                  {assumptions.synthesis_note}
                 </p>
-
-                {assumptions.assumptions.map((a) => (
-                  <div key={a.id} className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
+                {assumptions.assumptions.map((a, idx) => (
+                  <div key={a.id} style={{ marginBottom: idx < assumptions.assumptions.length - 1 ? 20 : 0 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <span
-                          className={`text-xs font-bold ${
-                            a.direction === "positive" ? "text-green-400" : "text-red-400"
-                          }`}
+                          className="font-mono"
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            color: a.direction === "positive" ? "var(--risk-favorable)" : "var(--risk-critical)",
+                          }}
                         >
                           {a.direction === "positive" ? "+" : "−"}
                         </span>
-                        <span className="text-sm" style={{ color: "var(--text-secondary)" }}>
-                          {a.label}
-                        </span>
+                        <span style={{ fontSize: 13, color: "var(--text-primary)" }}>{a.label}</span>
                       </div>
-                      <span className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>
+                      <span className="font-mono" style={{ fontSize: 11, color: "var(--text-muted)" }}>
                         {((editedWeights[a.id] ?? a.weight) * 100).toFixed(0)}%
                       </span>
                     </div>
-                    <p className="text-xs pl-4" style={{ color: "var(--text-muted)" }}>
+                    <p
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-muted)",
+                        marginBottom: 6,
+                        paddingLeft: 20,
+                        lineHeight: 1.5,
+                      }}
+                    >
                       {a.description}
                     </p>
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      value={editedWeights[a.id] ?? a.weight}
-                      onChange={(e) => {
-                        const newW = {
-                          ...editedWeights,
-                          [a.id]: parseFloat(e.target.value),
-                        };
-                        setEditedWeights(newW);
-                        setBaseProbability(
-                          recomputeFromAssumptions(assumptions.assumptions, newW)
-                        );
-                      }}
-                      className="w-full"
-                      style={{
-                        accentColor:
-                          a.direction === "positive" ? "#34d399" : "#f87171",
-                      }}
-                    />
+                    <div style={{ paddingLeft: 20 }}>
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={editedWeights[a.id] ?? a.weight}
+                        onChange={(e) => {
+                          const w = { ...editedWeights, [a.id]: parseFloat(e.target.value) };
+                          setEditedWeights(w);
+                          setBaseProbability(recomputeFromAssumptions(assumptions.assumptions, w));
+                        }}
+                        style={{ width: "100%" }}
+                      />
+                    </div>
                   </div>
                 ))}
-
                 <button
+                  className="btn-ghost"
+                  style={{ marginTop: 12 }}
                   onClick={() => {
                     const w: Record<string, number> = {};
                     assumptions.assumptions.forEach((a) => {
                       w[a.id] = a.weight;
                     });
                     setEditedWeights(w);
-                    setBaseProbability(
-                      recomputeFromAssumptions(assumptions.assumptions, w)
-                    );
+                    setBaseProbability(recomputeFromAssumptions(assumptions.assumptions, w));
                   }}
-                  className="text-xs transition-colors"
-                  style={{ color: "var(--text-muted)" }}
                 >
-                  ↺ Reset to AI estimate
+                  ↺ reset to ai estimate
                 </button>
               </div>
             )}
-          </div>
+          </section>
         )}
 
-        {/* ── Sliders ─────────────────────────────────────────────────────── */}
-        <div className="space-y-5 mb-8">
-          <div>
-            <div className="flex justify-between text-sm mb-2">
-              <span className="font-medium" style={{ color: "var(--text-secondary)" }}>
-                Base Probability
-              </span>
-              <span className="font-bold" style={{ color: "var(--text-primary)" }}>
-                {(baseProbability * 100).toFixed(0)}%
-              </span>
+        {/* ── Parameter Controls ────────────────────────────────────────── */}
+        <section style={{ marginBottom: 32 }}>
+          <Label>Simulation Parameters</Label>
+          <div className="card" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            {/* Base probability */}
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                  Base Probability <span className="font-mono" style={{ fontSize: 10 }}>(p₀)</span>
+                </span>
+                <span className="font-mono" style={{ fontSize: 14, fontWeight: 700, color: "var(--text-white)" }}>
+                  {(baseProbability * 100).toFixed(0)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0.01}
+                max={0.99}
+                step={0.01}
+                value={baseProbability}
+                onChange={(e) => setBaseProbability(parseFloat(e.target.value))}
+              />
             </div>
-            <input
-              type="range"
-              min={0.01}
-              max={0.99}
-              step={0.01}
-              value={baseProbability}
-              onChange={(e) => setBaseProbability(parseFloat(e.target.value))}
-              className="w-full accent-blue-500"
-            />
-          </div>
 
-          <div>
-            <div className="flex justify-between text-sm mb-2">
-              <span className="font-medium" style={{ color: "var(--text-secondary)" }}>
-                Confidence in Estimate
-              </span>
-              <span className="font-bold" style={{ color: "var(--text-primary)" }}>
-                {(confidence * 100).toFixed(0)}%
-              </span>
+            {/* Confidence */}
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                  Confidence Level <span className="font-mono" style={{ fontSize: 10 }}>(c)</span>
+                </span>
+                <span className="font-mono" style={{ fontSize: 14, fontWeight: 700, color: "var(--text-white)" }}>
+                  {(confidence * 100).toFixed(0)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0.1}
+                max={1}
+                step={0.01}
+                value={confidence}
+                onChange={(e) => setConfidence(parseFloat(e.target.value))}
+              />
+              <p className="font-mono" style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 6 }}>
+                α = {(baseProbability * confidence * 20).toFixed(2)},&nbsp; β ={" "}
+                {((1 - baseProbability) * confidence * 20).toFixed(2)}&nbsp; (Beta distribution parameters)
+              </p>
             </div>
-            <input
-              type="range"
-              min={0.1}
-              max={1}
-              step={0.01}
-              value={confidence}
-              onChange={(e) => setConfidence(parseFloat(e.target.value))}
-              className="w-full accent-blue-500"
-            />
-            <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
-              Lower confidence = wider distribution = more uncertainty
-            </p>
+
+            {/* ── NEW: Risk slider ───────────────────────────────────────── */}
+            <RiskSliderSection risk={risk} setRisk={setRisk} />
           </div>
+        </section>
+
+        {/* Run simulation button */}
+        <div style={{ marginBottom: 40 }}>
+          <button className="btn-primary" onClick={runSimulation} disabled={simulating}>
+            {simulating ? "RUNNING 10,000 MONTE CARLO TRIALS..." : "RUN SIMULATION"}
+          </button>
         </div>
-
-        {/* ── Run Simulation button ───────────────────────────────────────── */}
-        <button
-          onClick={runSimulation}
-          disabled={simulating}
-          className="w-full mb-8 bg-white text-gray-950 hover:bg-gray-100 disabled:opacity-40
-                     disabled:cursor-not-allowed font-semibold py-2.5 rounded-lg transition-colors"
-        >
-          {simulating ? "Running 10,000 trials..." : "Run Simulation"}
-        </button>
 
         {/* ── Results ─────────────────────────────────────────────────────── */}
         {result && (
-          <div className="space-y-4">
+          <div>
+            <HR />
 
-            {/* Stat cards */}
-            <div className="grid grid-cols-3 gap-3">
-              {[
-                {
-                  value: `${(result.mean * 100).toFixed(1)}%`,
-                  label: "Mean",
-                },
-                {
-                  value: `±${(result.std_dev * 100).toFixed(1)}%`,
-                  label: "Std Dev",
-                },
-                {
-                  value: `${(result.confidence_interval_low * 100).toFixed(1)}% – ${(result.confidence_interval_high * 100).toFixed(1)}%`,
-                  label: "95% CI",
-                  small: true,
-                },
-              ].map((card) => (
-                <div
-                  key={card.label}
-                  className="rounded-lg p-4 text-center border"
-                  style={{ background: "var(--surface-2)", borderColor: "var(--border)" }}
-                >
-                  <p
-                    className={`font-bold text-white ${card.small ? "text-sm mt-1" : "text-2xl"}`}
+            {/* Primary statistics */}
+            <section style={{ marginBottom: 28 }}>
+              <Label>Primary Statistics — {result.trials.toLocaleString()} trials</Label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 1, background: "var(--border)" }}>
+                {[
+                  { label: "E[P]  mean", value: `${(result.mean * 100).toFixed(2)}%` },
+                  { label: "σ  std dev", value: `±${(result.std_dev * 100).toFixed(2)}%` },
+                  {
+                    label: "95% CI",
+                    value: `[${(result.confidence_interval_low * 100).toFixed(1)}, ${(result.confidence_interval_high * 100).toFixed(1)}]`,
+                    small: true,
+                  },
+                ].map((card) => (
+                  <div
+                    key={card.label}
+                    style={{
+                      background: "var(--surface-1)",
+                      padding: "16px 14px",
+                      textAlign: "center",
+                    }}
                   >
-                    {card.value}
-                  </p>
-                  <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
-                    {card.label}
-                  </p>
-                </div>
-              ))}
-            </div>
-
-            {/* ── Risk Interpretation Card ─────────────────────────────────── */}
-            {interpretation && (
-              <div
-                className="rounded-lg border overflow-hidden"
-                style={{ borderColor: interpretation.risk_profile.color + "44" }}
-              >
-                {/* Header */}
-                <div
-                  className="px-4 py-3 flex items-center justify-between"
-                  style={{ background: interpretation.risk_profile.color + "18" }}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="flex gap-1">
-                      {[1, 2, 3, 4, 5].map((i) => (
-                        <div
-                          key={i}
-                          className="w-2 h-2 rounded-full transition-all"
-                          style={{
-                            background:
-                              i <= interpretation.risk_profile.score
-                                ? interpretation.risk_profile.color
-                                : "var(--surface-3)",
-                          }}
-                        />
-                      ))}
-                    </div>
-                    <span
-                      className="text-sm font-semibold"
-                      style={{ color: interpretation.risk_profile.color }}
-                    >
-                      {interpretation.risk_profile.label}
-                    </span>
-                  </div>
-                  <div className="flex gap-2 text-xs" style={{ color: "var(--text-muted)" }}>
-                    <span
-                      className="px-2 py-0.5 rounded"
-                      style={{ background: "var(--surface-2)" }}
-                    >
-                      {interpretation.confidence_class} confidence
-                    </span>
-                    <span
-                      className="px-2 py-0.5 rounded"
-                      style={{ background: "var(--surface-2)" }}
-                    >
-                      {interpretation.spread_class} spread
-                    </span>
-                  </div>
-                </div>
-
-                {/* Body */}
-                <div
-                  className="px-4 py-4 space-y-3"
-                  style={{ background: "var(--surface-1)" }}
-                >
-                  <p className="text-sm leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-                    {interpretation.headline}
-                  </p>
-
-                  {interpretation.fragility_warning && (
-                    <div className="pl-3 border-l-2" style={{ borderColor: "#f97316" }}>
-                      <p className="text-xs font-semibold mb-1" style={{ color: "#f97316" }}>
-                        ⚠ FRAGILITY WARNING
-                      </p>
-                      <p className="text-xs leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-                        {interpretation.fragility_warning}
-                      </p>
-                    </div>
-                  )}
-
-                  {interpretation.epistemic_note && (
-                    <div className="pl-3 border-l-2" style={{ borderColor: "#fbbf24" }}>
-                      <p className="text-xs font-semibold mb-1" style={{ color: "#fbbf24" }}>
-                        ◈ EPISTEMIC OPPORTUNITY
-                      </p>
-                      <p className="text-xs leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-                        {interpretation.epistemic_note}
-                      </p>
-                    </div>
-                  )}
-
-                  {interpretation.convergence_note && (
-                    <div className="pl-3 border-l-2 border-red-700">
-                      <p className="text-xs font-semibold mb-1 text-red-400">
-                        ◉ CONVERGENCE FLAG
-                      </p>
-                      <p className="text-xs leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-                        {interpretation.convergence_note}
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="pt-2 border-t" style={{ borderColor: "var(--border)" }}>
                     <p
-                      className="text-xs font-semibold uppercase tracking-wider mb-1"
-                      style={{ color: "var(--text-muted)" }}
-                    >
-                      Recommended Action
-                    </p>
-                    <p className="text-xs leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-                      {interpretation.action_framing}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* ── Statistical Diagnostics ──────────────────────────────────── */}
-            <div className="grid grid-cols-4 gap-2">
-              {[
-                {
-                  label: "R-hat",
-                  value: result.rhat?.toFixed(4) ?? "—",
-                  sub: result.converged != null
-                    ? result.converged ? "✓ Converged" : "⚠ Review"
-                    : "—",
-                  ok: result.converged ?? true,
-                  tip: "Gelman-Rubin convergence. < 1.01 = fully converged.",
-                },
-                {
-                  label: "Var Reduction",
-                  value:
-                    result.variance_reduction_pct != null
-                      ? `${result.variance_reduction_pct.toFixed(1)}%`
-                      : "—",
-                  sub: "Antithetic",
-                  ok: true,
-                  tip: "Variance reduction from antithetic variates vs naive Monte Carlo.",
-                },
-                {
-                  label: "EVIU",
-                  value: result.eviu?.toFixed(4) ?? "—",
-                  sub:
-                    result.eviu != null
-                      ? result.eviu > 0.02
-                        ? "Distrib. matters"
-                        : "Point est. fine"
-                      : "—",
-                  ok: result.eviu != null ? result.eviu > 0.02 : true,
-                  tip: "Expected Value of Including Uncertainty. High = full distribution adds real decision value.",
-                },
-                {
-                  label: "Uncertainty",
-                  value:
-                    result.uncertainty_type === "epistemic-dominant"
-                      ? "Epistemic"
-                      : result.uncertainty_type === "aleatory-dominant"
-                      ? "Aleatory"
-                      : "—",
-                  sub:
-                    result.epistemic_fraction != null
-                      ? `${(result.epistemic_fraction * 100).toFixed(0)}% reducible`
-                      : "—",
-                  ok: result.uncertainty_type !== "epistemic-dominant",
-                  tip: "Epistemic = reducible. Aleatory = irreducible inherent randomness.",
-                },
-              ].map((stat) => (
-                <div
-                  key={stat.label}
-                  className="relative group rounded-lg p-3 border text-center cursor-help"
-                  style={{
-                    background: "var(--surface-1)",
-                    borderColor: stat.ok ? "var(--border)" : "#7c3a3a",
-                  }}
-                >
-                  <p
-                    className="text-xs uppercase tracking-wider mb-1"
-                    style={{ color: "var(--text-muted)" }}
-                  >
-                    {stat.label}
-                  </p>
-                  <p
-                    className="text-sm font-bold font-mono"
-                    style={{ color: "var(--text-primary)" }}
-                  >
-                    {stat.value}
-                  </p>
-                  <p
-                    className={`text-xs mt-0.5 ${
-                      stat.ok ? "" : "text-red-400"
-                    }`}
-                    style={stat.ok ? { color: "var(--text-muted)" } : {}}
-                  >
-                    {stat.sub}
-                  </p>
-                  <div
-                    className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2
-                                rounded text-xs opacity-0 group-hover:opacity-100
-                                transition-opacity pointer-events-none z-10"
-                    style={{
-                      background: "var(--surface-2)",
-                      border: "1px solid var(--border)",
-                      color: "var(--text-secondary)",
-                    }}
-                  >
-                    {stat.tip}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* ── Uncertainty Decomposition Bar ──────────────────────────── */}
-            {result.aleatory_fraction != null && result.epistemic_fraction != null && (
-              <div
-                className="p-4 rounded-lg border"
-                style={{ background: "var(--surface-1)", borderColor: "var(--border)" }}
-              >
-                <p
-                  className="text-xs uppercase tracking-wider mb-3"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  Uncertainty Decomposition — Der Kiureghian &amp; Ditlevsen (2009)
-                </p>
-                <div className="flex rounded-full overflow-hidden h-2.5 mb-2">
-                  <div
-                    className="transition-all duration-500"
-                    style={{
-                      width: `${result.aleatory_fraction * 100}%`,
-                      background: "#4f8ef7",
-                    }}
-                  />
-                  <div
-                    className="transition-all duration-500"
-                    style={{
-                      width: `${result.epistemic_fraction * 100}%`,
-                      background: "#fbbf24",
-                    }}
-                  />
-                </div>
-                <div
-                  className="flex justify-between text-xs"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  <span>
-                    <span className="inline-block w-2 h-2 rounded-full bg-blue-500 mr-1.5" />
-                    Aleatory {(result.aleatory_fraction * 100).toFixed(0)}% — irreducible
-                  </span>
-                  <span>
-                    <span className="inline-block w-2 h-2 rounded-full bg-yellow-500 mr-1.5" />
-                    Epistemic {(result.epistemic_fraction * 100).toFixed(0)}% — reducible
-                  </span>
-                </div>
-                {result.uncertainty_type === "epistemic-dominant" && (
-                  <p className="text-xs mt-2" style={{ color: "#d97706" }}>
-                    ↳ Gathering more specific evidence would meaningfully tighten this estimate.
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* ── Sensitivity Analysis ─────────────────────────────────────── */}
-            {sensitivity && (
-              <div
-                className="p-4 rounded-lg border"
-                style={{ background: "var(--surface-1)", borderColor: "var(--border)" }}
-              >
-                <p
-                  className="text-xs uppercase tracking-wider mb-4"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  Sensitivity Analysis — Spearman Rank Correlation
-                </p>
-                <div className="space-y-4">
-                  {[
-                    {
-                      label: "Probability Estimate",
-                      value: sensitivity.probability_sensitivity,
-                      impact: `${(sensitivity.probability_impact * 100).toFixed(1)}pp range on mean`,
-                      color: "#4f8ef7",
-                    },
-                    {
-                      label: "Confidence Level",
-                      value: sensitivity.confidence_sensitivity,
-                      impact: `${(sensitivity.confidence_impact * 100).toFixed(1)}pp range on spread`,
-                      color: "#34d399",
-                    },
-                  ].map((item) => (
-                    <div key={item.label}>
-                      <div className="flex justify-between text-xs mb-1.5">
-                        <span style={{ color: "var(--text-label)" }}>{item.label}</span>
-                        <span style={{ color: "var(--text-muted)" }}>{item.impact}</span>
-                      </div>
-                      <div
-                        className="h-2 rounded-full"
-                        style={{ background: "var(--surface-3)" }}
-                      >
-                        <div
-                          className="h-2 rounded-full transition-all duration-700"
-                          style={{
-                            width: `${item.value * 100}%`,
-                            background: item.color,
-                            opacity: 0.85,
-                          }}
-                        />
-                      </div>
-                      <p
-                        className="text-xs mt-1 text-right font-mono"
-                        style={{ color: "var(--text-muted)" }}
-                      >
-                        ρ = {item.value.toFixed(3)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-                <p
-                  className="text-xs mt-4 leading-relaxed border-t pt-3"
-                  style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}
-                >
-                  {sensitivity.interpretation}
-                </p>
-              </div>
-            )}
-
-            {/* ── Stress Test ──────────────────────────────────────────────── */}
-            {stressResult && (
-              <div
-                className="p-4 rounded-lg border"
-                style={{ background: "var(--surface-1)", borderColor: "var(--border)" }}
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <p
-                    className="text-xs uppercase tracking-wider"
-                    style={{ color: "var(--text-muted)" }}
-                  >
-                    Assumption Stress Test — ±15pp Shift Analysis
-                  </p>
-                  {stressResult.is_fragile && (
-                    <span
-                      className="text-xs px-2 py-0.5 rounded font-medium"
+                      className="font-mono"
                       style={{
-                        background: "#450a0a",
-                        color: "#fca5a5",
-                        border: "1px solid #7f1d1d",
+                        fontSize: card.small ? 14 : 24,
+                        fontWeight: 700,
+                        color: "var(--text-white)",
+                        margin: 0,
+                        lineHeight: 1.2,
                       }}
                     >
-                      ⚠ Fragile at ±{stressResult.fragility_frontier_pp}pp
+                      {card.value}
+                    </p>
+                    <p
+                      className="font-serif"
+                      style={{
+                        fontSize: 10,
+                        color: "var(--text-muted)",
+                        marginTop: 5,
+                        fontStyle: "italic",
+                        letterSpacing: "0.08em",
+                      }}
+                    >
+                      {card.label}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              {/* ── NEW: Distribution badge ───────────────────────────────── */}
+              <div style={{ marginTop: 12 }}>
+                <DistributionBadge distributionType={result.distribution_type} />
+              </div>
+
+              {/* ── NEW: Risk adjustment display ─────────────────────────── */}
+              <RiskAdjustmentDisplay
+                base={baseProbability}
+                adjusted={result.risk_adjusted_mean ?? result.mean}
+                risk={risk}
+              />
+            </section>
+
+            {/* ── Risk Interpretation ─────────────────────────────────────── */}
+            {interpretation && (
+              <section style={{ marginBottom: 28 }}>
+                <Label>Risk Classification</Label>
+                <div
+                  style={{
+                    border: `1px solid ${interpretation.risk_profile.color}44`,
+                    background: "var(--surface-1)",
+                  }}
+                >
+                  {/* Header row */}
+                  <div
+                    style={{
+                      padding: "10px 14px",
+                      borderBottom: `1px solid ${interpretation.risk_profile.color}22`,
+                      background: `${interpretation.risk_profile.color}0d`,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      {/* Score bar */}
+                      <div style={{ display: "flex", gap: 3 }}>
+                        {[1, 2, 3, 4, 5].map((i) => (
+                          <div
+                            key={i}
+                            style={{
+                              width: 18,
+                              height: 3,
+                              background:
+                                i <= interpretation.risk_profile.score ? interpretation.risk_profile.color : "var(--surface-3)",
+                            }}
+                          />
+                        ))}
+                      </div>
+                      <span
+                        className="font-mono"
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          letterSpacing: "0.1em",
+                          color: interpretation.risk_profile.color,
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        {interpretation.risk_profile.label}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", gap: 12 }}>
+                      {[interpretation.confidence_class, interpretation.spread_class].map((tag) => (
+                        <span
+                          key={tag}
+                          className="font-mono"
+                          style={{
+                            fontSize: 9,
+                            color: "var(--text-muted)",
+                            letterSpacing: "0.1em",
+                            textTransform: "uppercase",
+                          }}
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Body */}
+                  <div style={{ padding: "14px" }}>
+                    <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.65, margin: 0 }}>
+                      {interpretation.headline}
+                    </p>
+
+                    {(interpretation.fragility_warning || interpretation.epistemic_note || interpretation.convergence_note) && (
+                      <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+                        {interpretation.fragility_warning && (
+                          <div style={{ borderLeft: "2px solid var(--risk-high)", paddingLeft: 12 }}>
+                            <p
+                              className="font-mono"
+                              style={{ fontSize: 9, color: "var(--risk-high)", letterSpacing: "0.12em", marginBottom: 4 }}
+                            >
+                              FRAGILITY WARNING
+                            </p>
+                            <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
+                              {interpretation.fragility_warning}
+                            </p>
+                          </div>
+                        )}
+                        {interpretation.epistemic_note && (
+                          <div style={{ borderLeft: "2px solid var(--risk-moderate)", paddingLeft: 12 }}>
+                            <p
+                              className="font-mono"
+                              style={{ fontSize: 9, color: "var(--risk-moderate)", letterSpacing: "0.12em", marginBottom: 4 }}
+                            >
+                              EPISTEMIC OPPORTUNITY
+                            </p>
+                            <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
+                              {interpretation.epistemic_note}
+                            </p>
+                          </div>
+                        )}
+                        {interpretation.convergence_note && (
+                          <div style={{ borderLeft: "2px solid var(--risk-critical)", paddingLeft: 12 }}>
+                            <p
+                              className="font-mono"
+                              style={{ fontSize: 9, color: "var(--risk-critical)", letterSpacing: "0.12em", marginBottom: 4 }}
+                            >
+                              CONVERGENCE FLAG
+                            </p>
+                            <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
+                              {interpretation.convergence_note}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+                      <p
+                        className="font-mono"
+                        style={{ fontSize: 9, color: "var(--text-muted)", letterSpacing: "0.12em", marginBottom: 6 }}
+                      >
+                        RECOMMENDED ACTION
+                      </p>
+                      <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
+                        {interpretation.action_framing}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {/* ── Diagnostics table ────────────────────────────────────────── */}
+            <section style={{ marginBottom: 28 }}>
+              <Label>Diagnostic Statistics</Label>
+              <div style={{ background: "var(--surface-1)", border: "1px solid var(--border)" }}>
+                {[
+                  {
+                    key: "R̂ (Gelman-Rubin)",
+                    val: result.rhat?.toFixed(4) ?? "—",
+                    note: result.converged != null ? (result.converged ? "converged" : "⚠ review") : "—",
+                    ok: result.converged ?? true,
+                    tip: "Split-chain R-hat. Values below 1.01 indicate full convergence across 4 parallel chains.",
+                  },
+                  {
+                    key: "Var. reduction",
+                    val: result.variance_reduction_pct != null ? `${result.variance_reduction_pct.toFixed(1)}%` : "—",
+                    note: "antithetic variates",
+                    ok: true,
+                    tip: "Estimator variance reduction vs. naive Monte Carlo. Antithetic variates method (Hammersley & Handscomb, 1964).",
+                  },
+                  {
+                    key: "EVIU",
+                    val: result.eviu?.toFixed(5) ?? "—",
+                    note: result.eviu != null ? (result.eviu > 0.02 ? "distribution adds value" : "point estimate sufficient") : "—",
+                    ok: true,
+                    tip: "Expected Value of Including Uncertainty. Quantifies decision quality gain from using the full distribution over the point estimate.",
+                  },
+                  {
+                    key: "Uncertainty type",
+                    val: result.uncertainty_type === "epistemic-dominant" ? "EPISTEMIC" : result.uncertainty_type === "aleatory-dominant" ? "ALEATORY" : "—",
+                    note: result.epistemic_fraction != null ? `${(result.epistemic_fraction * 100).toFixed(0)}% reducible` : "—",
+                    ok: result.uncertainty_type !== "epistemic-dominant",
+                    tip: "Epistemic uncertainty is reducible via information gathering. Aleatory uncertainty is irreducible inherent randomness.",
+                  },
+                ].map((row, i, arr) => (
+                  <div
+                    key={row.key}
+                    className="tooltip-group"
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 140px 1fr",
+                      alignItems: "center",
+                      padding: "10px 14px",
+                      borderBottom: i < arr.length - 1 ? "1px solid var(--border)" : "none",
+                      gap: 12,
+                    }}
+                  >
+                    <span className="font-serif" style={{ fontSize: 12, fontStyle: "italic", color: "var(--text-secondary)" }}>
+                      {row.key}
+                    </span>
+                    <span
+                      className="font-mono"
+                      style={{
+                        fontSize: 14,
+                        fontWeight: 700,
+                        textAlign: "center",
+                        color: row.ok ? "var(--text-white)" : "var(--risk-critical)",
+                      }}
+                    >
+                      {row.val}
+                    </span>
+                    <span
+                      className="font-mono"
+                      style={{ fontSize: 10, color: "var(--text-muted)", textAlign: "right", letterSpacing: "0.06em" }}
+                    >
+                      {row.note}
+                    </span>
+                    <div className="tooltip-content" style={{ width: 260, whiteSpace: "normal", textAlign: "left" }}>
+                      {row.tip}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* ── Uncertainty decomposition ─────────────────────────────────── */}
+            {result.aleatory_fraction != null && result.epistemic_fraction != null && (
+              <section style={{ marginBottom: 28 }}>
+                <Label>Uncertainty Decomposition — Der Kiureghian &amp; Ditlevsen (2009)</Label>
+                <div className="card">
+                  {/* Decomposition bar */}
+                  <div
+                    style={{
+                      display: "flex",
+                      height: 2,
+                      background: "var(--border-hi)",
+                      marginBottom: 10,
+                      overflow: "hidden",
+                    }}
+                  >
+                    {/* Aleatory (grey) */}
+                    <div
+                      style={{
+                        width: `${result.aleatory_fraction * 100}%`,
+                        background: "var(--text-muted)",
+                        transition: "width 600ms",
+                      }}
+                    />
+                    {/* Epistemic (white) */}
+                    <div
+                      style={{
+                        flex: 1,
+                        background: "var(--text-white)",
+                        opacity: 0.6,
+                        transition: "width 600ms",
+                      }}
+                    />
+                  </div>
+
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+                    <span
+                      style={{
+                        fontFamily: "var(--font-mono), monospace",
+                        fontSize: 10,
+                        color: "var(--text-muted)",
+                        letterSpacing: "0.06em",
+                      }}
+                    >
+                      ALEATORY {(result.aleatory_fraction * 100).toFixed(0)}% — irreducible
+                    </span>
+                    <span
+                      style={{
+                        fontFamily: "var(--font-mono), monospace",
+                        fontSize: 10,
+                        color: result.uncertainty_type === "epistemic-dominant" ? "var(--text-white)" : "var(--text-muted)",
+                        letterSpacing: "0.06em",
+                      }}
+                    >
+                      EPISTEMIC {(result.epistemic_fraction * 100).toFixed(0)}% — reducible
+                    </span>
+                  </div>
+
+                  {/* Classification badge */}
+                  <div
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "4px 10px",
+                      border: `1px solid ${result.uncertainty_type === "epistemic-dominant" ? "var(--text-secondary)" : "var(--border-hi)"}`,
+                      background: "var(--surface-2)",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontFamily: "var(--font-mono), monospace",
+                        fontSize: 9,
+                        letterSpacing: "0.12em",
+                        color: result.uncertainty_type === "epistemic-dominant" ? "var(--text-white)" : "var(--text-muted)",
+                      }}
+                    >
+                      {result.uncertainty_type === "epistemic-dominant" ? "EPISTEMIC-DOMINANT" : "ALEATORY-DOMINANT"}
+                    </span>
+                  </div>
+
+                  {result.uncertainty_type === "epistemic-dominant" && (
+                    <p
+                      style={{
+                        fontFamily: "var(--font-serif), Georgia, serif",
+                        fontSize: 12,
+                        fontStyle: "italic",
+                        color: "var(--text-secondary)",
+                        marginTop: 12,
+                        lineHeight: 1.6,
+                      }}
+                    >
+                      ↳ The dominant uncertainty source is knowledge-based and reducible. Targeted evidence gathering — expert consultation,
+                      pilot testing, data collection — would meaningfully tighten this estimate.
+                    </p>
+                  )}
+
+                  {result.uncertainty_type !== "epistemic-dominant" && (
+                    <p
+                      style={{
+                        fontFamily: "var(--font-serif), Georgia, serif",
+                        fontSize: 12,
+                        fontStyle: "italic",
+                        color: "var(--text-muted)",
+                        marginTop: 12,
+                        lineHeight: 1.6,
+                      }}
+                    >
+                      ↳ The dominant uncertainty source is inherent randomness. Additional information is unlikely to substantially narrow
+                      this estimate&apos;s spread.
+                    </p>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {/* ── Sensitivity ──────────────────────────────────────────────── */}
+            {sensitivity && (
+              <section style={{ marginBottom: 28 }}>
+                <Label>Sensitivity Analysis — Spearman Rank Correlation</Label>
+                <div className="card">
+                  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                    {[
+                      {
+                        label: "Probability estimate (p₀)",
+                        ρ: sensitivity.probability_sensitivity,
+                        impact: `${(sensitivity.probability_impact * 100).toFixed(1)}pp range on E[P]`,
+                      },
+                      {
+                        label: "Confidence level (c)",
+                        ρ: sensitivity.confidence_sensitivity,
+                        impact: `${(sensitivity.confidence_impact * 100).toFixed(1)}pp range on σ`,
+                      },
+                    ].map((item) => (
+                      <div key={item.label}>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                          <span className="font-serif" style={{ fontSize: 12, fontStyle: "italic", color: "var(--text-secondary)" }}>
+                            {item.label}
+                          </span>
+                          <span className="font-mono" style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                            {item.impact}
+                          </span>
+                        </div>
+                        <div style={{ background: "var(--surface-3)", height: 2 }}>
+                          <div
+                            style={{
+                              height: 2,
+                              width: `${item.ρ * 100}%`,
+                              background: "var(--text-secondary)",
+                              transition: "width 700ms",
+                            }}
+                          />
+                        </div>
+                        <p className="font-mono" style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 5, textAlign: "right" }}>
+                          ρ = {item.ρ.toFixed(4)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ borderTop: "1px solid var(--border)", marginTop: 14, paddingTop: 12 }}>
+                    <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6, margin: 0 }}>
+                      {sensitivity.interpretation}
+                    </p>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {/* ── Stress test ──────────────────────────────────────────────── */}
+            {stressResult && (
+              <section style={{ marginBottom: 28 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                  <Label>Assumption Stress Test — ±15pp shift</Label>
+                  {stressResult.is_fragile && (
+                    <span
+                      className="font-mono"
+                      style={{
+                        fontSize: 9,
+                        letterSpacing: "0.1em",
+                        color: "var(--risk-critical)",
+                        border: "1px solid var(--risk-critical)",
+                        padding: "2px 8px",
+                      }}
+                    >
+                      FRAGILE ±{stressResult.fragility_frontier_pp}pp
                     </span>
                   )}
                 </div>
-
-                <div className="flex gap-1 mb-3">
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: `repeat(${stressResult.stress_points.length}, 1fr)`,
+                    gap: 1,
+                    background: "var(--border)",
+                  }}
+                >
                   {stressResult.stress_points.map((pt) => {
-                    const colorMap: Record<string, string> = {
-                      critical: "#ef4444",
-                      high: "#f97316",
-                      moderate: "#eab308",
-                      favorable: "#22c55e",
-                      strong: "#10b981",
-                    };
+                    const c = RISK_COLORS[pt.risk_category] ?? "#666";
                     const isBase = pt.shift_pp === 0;
                     return (
                       <div
                         key={pt.shift_pp}
-                        className="flex-1 rounded text-center py-2 relative group cursor-default"
+                        className="tooltip-group"
                         style={{
-                          background:
-                            colorMap[pt.risk_category] + (isBase ? "dd" : "33"),
-                          border: isBase
-                            ? `1px solid ${colorMap[pt.risk_category]}`
-                            : "1px solid transparent",
+                          background: isBase ? `${c}20` : "var(--surface-1)",
+                          padding: "10px 4px",
+                          textAlign: "center",
+                          borderBottom: isBase ? `2px solid ${c}` : "2px solid transparent",
                         }}
                       >
-                        <p
-                          className="text-xs font-mono font-bold"
-                          style={{ color: isBase ? "#fff" : colorMap[pt.risk_category] }}
-                        >
+                        <p className="font-mono" style={{ fontSize: 10, fontWeight: 700, color: c, margin: 0 }}>
                           {pt.shift_pp > 0 ? "+" : ""}
-                          {pt.shift_pp}pp
+                          {pt.shift_pp}
                         </p>
                         <p
-                          className="text-xs"
-                          style={{ color: isBase ? "#fff" : "var(--text-muted)" }}
+                          className="font-mono"
+                          style={{ fontSize: 11, color: isBase ? "var(--text-white)" : "var(--text-secondary)", margin: "2px 0 0" }}
                         >
                           {(pt.mean * 100).toFixed(0)}%
                         </p>
-                        {/* Tooltip */}
-                        <div
-                          className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 w-32 p-1.5
-                                      rounded text-xs opacity-0 group-hover:opacity-100
-                                      transition-opacity pointer-events-none z-10"
-                          style={{
-                            background: "var(--surface-2)",
-                            border: "1px solid var(--border)",
-                          }}
-                        >
-                          <p
-                            className="font-semibold capitalize"
-                            style={{ color: colorMap[pt.risk_category] }}
-                          >
-                            {pt.risk_category}
-                          </p>
-                          <p style={{ color: "var(--text-muted)" }}>
-                            CI: {(pt.ci_low * 100).toFixed(0)}%–
-                            {(pt.ci_high * 100).toFixed(0)}%
-                          </p>
+                        <div className="tooltip-content" style={{ width: 140, whiteSpace: "normal" }}>
+                          <span style={{ color: c, fontWeight: 700, textTransform: "uppercase", fontSize: 9 }}>{pt.risk_category}</span>
+                          <br />
+                          CI: {(pt.ci_low * 100).toFixed(0)}%–{(pt.ci_high * 100).toFixed(0)}%
                         </div>
                       </div>
                     );
                   })}
                 </div>
-
-                <p className="text-xs leading-relaxed" style={{ color: "var(--text-muted)" }}>
+                <p className="font-mono" style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 8, lineHeight: 1.6 }}>
                   {stressResult.is_fragile
-                    ? `This estimate changes risk category with a shift of only ±${stressResult.fragility_frontier_pp}pp — treat conclusions with caution and validate the core probability assumption.`
-                    : `Risk category remains stable across a ±${stressResult.robust_range_pp}pp range — estimate is robust to moderate assumption errors.`}
+                    ? `Risk category shifts at ±${stressResult.fragility_frontier_pp}pp. Validate the core probability assumption before acting.`
+                    : `Category stable across ±${stressResult.robust_range_pp}pp. Estimate is robust to moderate assumption errors.`}
                 </p>
-              </div>
+              </section>
             )}
 
-            {/* ── Pin / Compare controls ───────────────────────────────────── */}
-            {!pinnedResult && (
-              <button
-                onClick={() => {
-                  setPinnedResult(result);
-                  setPinnedDescription(description.slice(0, 60) + "...");
-                }}
-                className="w-full py-2 border text-sm rounded-lg transition-colors"
-                style={{
-                  borderColor: "var(--accent-blue-dim)",
-                  color: "var(--accent-blue)",
-                }}
-              >
-                📌 Pin as Scenario A — then change inputs to compare
-              </button>
-            )}
-
-            {pinnedResult && (
-              <div
-                className="p-3 rounded-lg border flex justify-between items-center"
-                style={{ background: "var(--surface-1)", borderColor: "var(--accent-blue-dim)" }}
-              >
-                <div>
-                  <span className="text-xs font-semibold" style={{ color: "var(--accent-blue)" }}>
-                    Scenario A pinned
-                  </span>
-                  <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
-                    {pinnedDescription}
-                  </p>
-                </div>
+            {/* ── Pin / Compare ────────────────────────────────────────────── */}
+            <section style={{ marginBottom: 28 }}>
+              {!pinnedResult ? (
                 <button
+                  className="btn-outline"
+                  style={{ width: "100%" }}
                   onClick={() => {
-                    setPinnedResult(null);
-                    setPinnedDescription("");
+                    setPinnedResult(result);
+                    setPinnedDescription(description.slice(0, 60) + "...");
                   }}
-                  className="text-xs transition-colors"
-                  style={{ color: "var(--text-muted)" }}
                 >
-                  ✕ Clear
+                  ⊕ pin as scenario A — change inputs to compare
                 </button>
-              </div>
-            )}
+              ) : (
+                <div className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <p className="font-mono" style={{ fontSize: 9, color: "var(--text-muted)", letterSpacing: "0.1em", marginBottom: 2 }}>
+                      SCENARIO A PINNED
+                    </p>
+                    <p style={{ fontSize: 12, color: "var(--text-secondary)" }}>{pinnedDescription}</p>
+                  </div>
+                  <button className="btn-ghost" onClick={() => { setPinnedResult(null); setPinnedDescription(""); }}>
+                    ✕ clear
+                  </button>
+                </div>
+              )}
+            </section>
 
             {/* ── Distribution Chart ────────────────────────────────────────── */}
-            <div
-              className="rounded-lg p-5"
-              style={{ background: "var(--surface-1)", border: "1px solid var(--border)" }}
-            >
-              <div className="flex items-center justify-between mb-4">
-                <p
-                  className="text-xs font-semibold uppercase tracking-wider"
-                  style={{ color: "var(--text-label)" }}
-                >
-                  {pinnedResult ? "Scenario Comparison" : "Probability Distribution"}
-                  {" — "}
-                  {result.trials.toLocaleString()} Monte Carlo Trials
-                </p>
+            <section style={{ marginBottom: 28 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 10 }}>
+                <Label>{pinnedResult ? "Scenario Comparison" : "Probability Distribution"}</Label>
                 {pinnedResult && (
-                  <div className="flex gap-4 text-xs" style={{ color: "var(--text-muted)" }}>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-0.5 bg-blue-400 inline-block" />
-                      A: {(pinnedResult.mean * 100).toFixed(1)}%
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-0.5 bg-emerald-400 inline-block" />
-                      B: {(result.mean * 100).toFixed(1)}%
-                    </span>
+                  <div style={{ display: "flex", gap: 16, marginBottom: 10 }}>
+                    {[
+                      { label: "A", mean: pinnedResult.mean, color: "#888" },
+                      { label: "B", mean: result.mean, color: "var(--text-white)" },
+                    ].map((s) => (
+                      <span key={s.label} className="font-mono" style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                        <span style={{ color: s.color }}>■</span> {s.label}: {(s.mean * 100).toFixed(1)}%
+                      </span>
+                    ))}
                   </div>
                 )}
               </div>
 
-              <ResponsiveContainer width="100%" height={220}>
-                <AreaChart
-                  data={
-                    (pinnedResult
-                      ? buildComparisonData(pinnedResult, result)
-                      : liveChartData) as ChartPoint[]
-                  }
-                  margin={{ top: 5, right: 10, left: -20, bottom: 5 }}
-                >
-                  <defs>
-                    <linearGradient id="gradA" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
-                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.05} />
-                    </linearGradient>
-                    <linearGradient id="gradB" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0.05} />
-                    </linearGradient>
-                  </defs>
+              <div style={{ border: "1px solid var(--border)", padding: "16px 8px 8px 8px", background: "var(--surface-1)" }}>
+                <ResponsiveContainer width="100%" height={200}>
+                  <AreaChart
+                    data={(pinnedResult ? buildComparisonData(pinnedResult, result) : liveChartData) as ChartPoint[]}
+                    margin={{ top: 4, right: 8, left: -24, bottom: 4 }}
+                  >
+                    <defs>
+                      <linearGradient id="gA" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#888" stopOpacity={0.35} />
+                        <stop offset="100%" stopColor="#888" stopOpacity={0.02} />
+                      </linearGradient>
+                      <linearGradient id="gB" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#f0f0f0" stopOpacity={0.45} />
+                        <stop offset="100%" stopColor="#f0f0f0" stopOpacity={0.02} />
+                      </linearGradient>
+                    </defs>
 
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1a2540" />
-                  <XAxis
-                    dataKey={pinnedResult ? "x" : "probability"}
-                    tickFormatter={(v) => `${v}%`}
-                    tick={{ fill: "#6b7280", fontSize: 11 }}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    tick={{ fill: "#6b7280", fontSize: 11 }}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: "var(--surface-2)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "8px",
-                    }}
-                    labelStyle={{ color: "#9ca3af", fontSize: 12 }}
-                    labelFormatter={(label) => `${label}% probability`}
-                    formatter={(value) => [
-                      typeof value === "number" ? value.toFixed(3) : "0.000",
-                    ]}
-                  />
-
-                  {/* Risk bands */}
-                  <ReferenceArea x1={0} x2={25} fill="#ef4444" fillOpacity={0.12} />
-                  <ReferenceArea x1={25} x2={50} fill="#f97316" fillOpacity={0.12} />
-                  <ReferenceArea x1={50} x2={75} fill="#eab308" fillOpacity={0.12} />
-                  <ReferenceArea x1={75} x2={100} fill="#22c55e" fillOpacity={0.12} />
-
-                  {/* Mean lines */}
-                  <ReferenceLine
-                    x={
-                      pinnedResult
-                        ? Math.round(pinnedResult.mean * 100)
-                        : Math.round(result.mean * 100)
-                    }
-                    stroke="#60a5fa"
-                    strokeDasharray="4 4"
-                    label={{
-                      value: pinnedResult ? "A" : "mean",
-                      fill: "#60a5fa",
-                      fontSize: 11,
-                    }}
-                  />
-                  {pinnedResult && (
-                    <ReferenceLine
-                      x={Math.round(result.mean * 100)}
-                      stroke="#34d399"
-                      strokeDasharray="4 4"
-                      label={{ value: "B", fill: "#34d399", fontSize: 11 }}
+                    <CartesianGrid stroke="var(--surface-3)" strokeDasharray="none" />
+                    <XAxis
+                      dataKey={pinnedResult ? "x" : "probability"}
+                      tickFormatter={(v) => `${v}%`}
+                      tick={{ fill: "var(--text-muted)", fontSize: 10, fontFamily: "var(--font-mono)" }}
+                      tickLine={false}
+                      axisLine={{ stroke: "var(--border-hi)" }}
                     />
-                  )}
+                    <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10, fontFamily: "var(--font-mono)" }} tickLine={false} axisLine={false} />
+                    <Tooltip
+                      contentStyle={{
+                        background: "var(--surface-2)",
+                        border: "1px solid var(--border-mid)",
+                        fontFamily: "var(--font-mono)",
+                        fontSize: 11,
+                        color: "var(--text-secondary)",
+                      }}
+                      labelStyle={{ color: "var(--text-muted)", fontSize: 10 }}
+                      labelFormatter={(v) => `p = ${v}%`}
+                      formatter={(v) => [typeof v === "number" ? v.toFixed(3) : "0.000", "density"]}
+                    />
 
-                  <Area
-                    type="monotone"
-                    dataKey={pinnedResult ? "densityA" : "density"}
-                    stroke="#3b82f6"
-                    strokeWidth={2}
-                    fill="url(#gradA)"
-                    dot={false}
-                    animationDuration={400}
-                  />
-                  {pinnedResult && (
+                    {/* Risk bands — colored, functional data */}
+                    <ReferenceArea x1={0} x2={25} fill={RISK_COLORS.critical} fillOpacity={0.06} />
+                    <ReferenceArea x1={25} x2={50} fill={RISK_COLORS.high} fillOpacity={0.06} />
+                    <ReferenceArea x1={50} x2={75} fill={RISK_COLORS.moderate} fillOpacity={0.06} />
+                    <ReferenceArea x1={75} x2={100} fill={RISK_COLORS.favorable} fillOpacity={0.06} />
+
+                    <ReferenceLine
+                      x={pinnedResult ? Math.round(pinnedResult.mean * 100) : Math.round(result.mean * 100)}
+                      stroke="var(--border-hi)"
+                      strokeDasharray="3 3"
+                      label={{
+                        value: pinnedResult ? "A" : "μ",
+                        fill: "var(--text-muted)",
+                        fontSize: 10,
+                        fontFamily: "var(--font-mono)",
+                      }}
+                    />
+                    {pinnedResult && (
+                      <ReferenceLine
+                        x={Math.round(result.mean * 100)}
+                        stroke="var(--text-secondary)"
+                        strokeDasharray="3 3"
+                        label={{ value: "B", fill: "var(--text-secondary)", fontSize: 10, fontFamily: "var(--font-mono)" }}
+                      />
+                    )}
+
                     <Area
                       type="monotone"
-                      dataKey="densityB"
-                      stroke="#10b981"
-                      strokeWidth={2}
-                      fill="url(#gradB)"
+                      dataKey={pinnedResult ? "densityA" : "density"}
+                      stroke="#888"
+                      strokeWidth={1.5}
+                      fill="url(#gA)"
                       dot={false}
-                      animationDuration={400}
+                      animationDuration={300}
                     />
-                  )}
-                </AreaChart>
-              </ResponsiveContainer>
+                    {pinnedResult && (
+                      <Area
+                        type="monotone"
+                        dataKey="densityB"
+                        stroke="var(--text-white)"
+                        strokeWidth={1.5}
+                        fill="url(#gB)"
+                        dot={false}
+                        animationDuration={300}
+                      />
+                    )}
+                  </AreaChart>
+                </ResponsiveContainer>
 
-              {/* Risk zone legend */}
-              <div className="flex justify-between mt-3 px-1">
-                {[
-                  { label: "Low", color: "bg-red-500", range: "0–25%" },
-                  { label: "Uncertain", color: "bg-orange-500", range: "25–50%" },
-                  { label: "Moderate", color: "bg-yellow-500", range: "50–75%" },
-                  { label: "High", color: "bg-green-500", range: "75–100%" },
-                ].map((zone) => (
-                  <div key={zone.label} className="flex items-center gap-1.5">
-                    <div
-                      className={`w-2 h-2 rounded-full ${zone.color} opacity-70`}
-                    />
-                    <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-                      {zone.label}{" "}
-                      <span style={{ color: "var(--surface-3)" }}>{zone.range}</span>
+                {/* Risk zone key */}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    marginTop: 8,
+                    paddingTop: 8,
+                    borderTop: "1px solid var(--border)",
+                  }}
+                >
+                  {[
+                    { label: "Critical 0–25%", color: RISK_COLORS.critical },
+                    { label: "High 25–50%", color: RISK_COLORS.high },
+                    { label: "Moderate 50–75%", color: RISK_COLORS.moderate },
+                    { label: "Strong 75–100%", color: RISK_COLORS.favorable },
+                  ].map((z) => (
+                    <span key={z.label} className="font-mono" style={{ fontSize: 9, color: "var(--text-muted)", letterSpacing: "0.04em" }}>
+                      <span style={{ color: z.color }}>■</span> {z.label}
                     </span>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
+            </section>
 
-            {/* ── Add to Portfolio button ─────────────────────────────────── */}
-            <button
-              onClick={() => {
-                if (!result) return;
-                const entry: PortfolioScenario = {
-                  label: `Scenario ${portfolio.length + 1}`,
-                  description: description.slice(0, 60),
-                  base_probability: baseProbability,
-                  confidence,
-                  mean: result.mean,
-                  std_dev: result.std_dev,
-                  confidence_interval_low: result.confidence_interval_low,
-                  confidence_interval_high: result.confidence_interval_high,
-                  eviu: result.eviu ?? 0,
-                  uncertainty_type: result.uncertainty_type ?? "aleatory-dominant",
-                };
-                setPortfolio((prev) => [...prev.slice(0, 3), entry]);
-                setPortfolioResult(null);
-              }}
-              disabled={portfolio.length >= 4}
-              className="w-full py-2 border text-sm rounded-lg transition-colors disabled:opacity-40"
-              style={{
-                borderColor: "#14532d",
-                color: "#34d399",
-              }}
-            >
-              + Add to Portfolio Analysis{" "}
-              {portfolio.length > 0 ? `(${portfolio.length}/4)` : ""}
-            </button>
+            {/* ── Portfolio button ────────────────────────────────────────── */}
+            <section style={{ marginBottom: 28 }}>
+              <button
+                className="btn-outline"
+                style={{ width: "100%" }}
+                disabled={portfolio.length >= 4}
+                onClick={() => {
+                  const entry: PortfolioScenario = {
+                    label: `S${portfolio.length + 1}`,
+                    description: description.slice(0, 60),
+                    base_probability: baseProbability,
+                    confidence,
+                    mean: result.mean,
+                    std_dev: result.std_dev,
+                    confidence_interval_low: result.confidence_interval_low,
+                    confidence_interval_high: result.confidence_interval_high,
+                    eviu: result.eviu ?? 0,
+                    uncertainty_type: result.uncertainty_type ?? "aleatory-dominant",
+                  };
+                  setPortfolio((p) => [...p.slice(0, 3), entry]);
+                  setPortfolioResult(null);
+                }}
+              >
+                ⊕ add to portfolio analysis {portfolio.length > 0 ? `(${portfolio.length}/4)` : ""}
+              </button>
+            </section>
+
+            {/* ── NEW: Copula Panel ───────────────────────────────────────── */}
+            <CopulaPanel apiUrl={API_URL} baseProbability={baseProbability} />
 
             {/* ── Decision Summary ─────────────────────────────────────────── */}
             {decisionSummary && (
-              <div
-                className="rounded-lg p-5 space-y-3 border"
-                style={{ background: "var(--surface-1)", borderColor: "var(--border)" }}
-              >
-                <p
-                  className="text-xs font-semibold uppercase tracking-wider"
-                  style={{ color: "var(--text-label)" }}
-                >
-                  Decision Summary
-                </p>
-                <p className="text-sm leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-                  {decisionSummary.summary}
-                </p>
-                <div className="pl-3 border-l-2 border-yellow-600">
-                  <p className="text-xs font-medium mb-0.5 text-yellow-500">
-                    Key Uncertainty Insight
+              <section style={{ marginBottom: 28 }}>
+                <Label>Decision Summary</Label>
+                <div className="card" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.7, margin: 0 }}>
+                    {decisionSummary.summary}
                   </p>
-                  <p className="text-sm leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-                    {decisionSummary.key_insight}
-                  </p>
+                  <div style={{ borderLeft: "2px solid var(--risk-moderate)", paddingLeft: 12 }}>
+                    <p className="font-mono" style={{ fontSize: 9, color: "var(--risk-moderate)", letterSpacing: "0.12em", marginBottom: 5 }}>
+                      KEY UNCERTAINTY INSIGHT
+                    </p>
+                    <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.65, margin: 0 }}>
+                      {decisionSummary.key_insight}
+                    </p>
+                  </div>
+                  <div style={{ borderLeft: "2px solid var(--border-hi)", paddingLeft: 12 }}>
+                    <p className="font-mono" style={{ fontSize: 9, color: "var(--text-muted)", letterSpacing: "0.12em", marginBottom: 5 }}>
+                      DECISION FRAMING
+                    </p>
+                    <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.65, margin: 0 }}>
+                      {decisionSummary.decision_framing}
+                    </p>
+                  </div>
                 </div>
-                <div className="pl-3 border-l-2 border-blue-700">
-                  <p className="text-xs font-medium mb-0.5" style={{ color: "var(--accent-blue)" }}>
-                    Decision Framing
-                  </p>
-                  <p className="text-sm leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-                    {decisionSummary.decision_framing}
-                  </p>
-                </div>
-              </div>
+              </section>
             )}
           </div>
         )}
 
+        <HR />
+
         {/* ── Scenario History ──────────────────────────────────────────────── */}
         {history.length > 0 && (
-          <div
-            className="mt-6 rounded-lg border p-5"
-            style={{ background: "var(--surface-1)", borderColor: "var(--border)" }}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <p
-                className="text-xs font-semibold uppercase tracking-wider"
-                style={{ color: "var(--text-label)" }}
-              >
-                Scenario History ({history.length})
-              </p>
-              <div className="flex gap-4">
-                <button
-                  onClick={() => exportSessionJSON(history)}
-                  className="text-xs transition-colors"
-                  style={{ color: "var(--accent-blue)" }}
-                >
-                  ↓ Export JSON
+          <section style={{ marginBottom: 32 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 10 }}>
+              <Label>Scenario History ({history.length})</Label>
+              <div style={{ display: "flex", gap: 16, marginBottom: 10 }}>
+                <button className="btn-ghost" onClick={() => exportJSON(history)}>
+                  ↓ json
                 </button>
-                <button
-                  onClick={() => exportLatex(history)}
-                  className="text-xs transition-colors"
-                  style={{ color: "#34d399" }}
-                >
-                  ↓ Export LaTeX
+                <button className="btn-ghost" onClick={() => exportLatex(history)}>
+                  ↓ latex
                 </button>
-                <button
-                  onClick={clearAllHistory}
-                  className="text-xs transition-colors"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  Clear all
+                <button className="btn-ghost" onClick={() => { localStorage.removeItem(HISTORY_KEY); setHistory([]); }}>
+                  ✕ clear
                 </button>
               </div>
             </div>
 
-            <div className="space-y-2">
-              {history.map((entry) => (
+            <div style={{ border: "1px solid var(--border)" }}>
+              {/* Table header */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "80px 1fr 80px 80px",
+                  padding: "6px 12px",
+                  borderBottom: "1px solid var(--border)",
+                  background: "var(--surface-2)",
+                }}
+              >
+                {["time", "scenario", "E[P]", "σ"].map((h) => (
+                  <span
+                    key={h}
+                    className="font-mono"
+                    style={{ fontSize: 9, color: "var(--text-muted)", letterSpacing: "0.1em", textTransform: "uppercase" }}
+                  >
+                    {h}
+                  </span>
+                ))}
+              </div>
+              {/* Table rows */}
+              {history.map((entry, i) => (
                 <div
                   key={entry.id}
                   onClick={() => {
@@ -1550,52 +1939,52 @@ export default function Home() {
                     setBaseProbability(entry.baseProbability);
                     setConfidence(entry.confidence);
                   }}
-                  className="flex items-center justify-between p-3 rounded-lg cursor-pointer border transition-colors"
-                  style={{ background: "var(--surface-2)", borderColor: "var(--border)" }}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "80px 1fr 80px 80px",
+                    padding: "8px 12px",
+                    borderBottom: i < history.length - 1 ? "1px solid var(--border)" : "none",
+                    cursor: "pointer",
+                    transition: "background 100ms",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-2)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                 >
-                  <div className="flex-1 min-w-0 mr-4">
-                    <p
-                      className="text-sm truncate"
-                      style={{ color: "var(--text-secondary)" }}
-                    >
-                      {entry.description}
-                    </p>
-                    <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
-                      {entry.timestamp}
-                    </p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p
-                      className="text-sm font-bold font-mono"
-                      style={{ color: "var(--text-primary)" }}
-                    >
-                      {((entry.result?.mean ?? 0) * 100).toFixed(1)}%
-                    </p>
-                    <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-                      ±{((entry.result?.std_dev ?? 0) * 100).toFixed(1)}%
-                    </p>
-                  </div>
+                  <span className="font-mono" style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                    {entry.timestamp}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: "var(--text-secondary)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      paddingRight: 12,
+                    }}
+                  >
+                    {entry.description}
+                  </span>
+                  <span className="font-mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--text-white)" }}>
+                    {((entry.result?.mean ?? 0) * 100).toFixed(1)}%
+                  </span>
+                  <span className="font-mono" style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                    ±{((entry.result?.std_dev ?? 0) * 100).toFixed(1)}%
+                  </span>
                 </div>
               ))}
             </div>
-          </div>
+          </section>
         )}
 
         {/* ── Portfolio Analysis ────────────────────────────────────────────── */}
         {portfolio.length >= 2 && (
-          <div
-            className="mt-6 rounded-lg border p-5"
-            style={{ background: "var(--surface-1)", borderColor: "var(--border)" }}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <p
-                className="text-xs font-semibold uppercase tracking-wider"
-                style={{ color: "var(--text-label)" }}
-              >
-                Portfolio Analysis — {portfolio.length} Scenarios
-              </p>
-              <div className="flex gap-3">
+          <section style={{ marginBottom: 32 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 10 }}>
+              <Label>Portfolio Analysis — {portfolio.length} scenarios</Label>
+              <div style={{ display: "flex", gap: 16, marginBottom: 10 }}>
                 <button
+                  className="btn-ghost"
                   onClick={async () => {
                     try {
                       const res = await fetch(`${API_URL}/portfolio`, {
@@ -1606,170 +1995,141 @@ export default function Home() {
                       if (res.ok) setPortfolioResult(await res.json());
                     } catch {}
                   }}
-                  className="text-xs transition-colors"
-                  style={{ color: "var(--accent-blue)" }}
                 >
-                  Analyse Portfolio →
+                  ▷ analyse
                 </button>
                 <button
+                  className="btn-ghost"
                   onClick={() => {
                     setPortfolio([]);
                     setPortfolioResult(null);
                   }}
-                  className="text-xs transition-colors"
-                  style={{ color: "var(--text-muted)" }}
                 >
-                  Clear
+                  ✕ clear
                 </button>
               </div>
             </div>
 
-            {/* Scenario list */}
-            <div className="space-y-2 mb-4">
+            <div style={{ border: "1px solid var(--border)" }}>
               {portfolio.map((s, i) => (
                 <div
                   key={i}
-                  className="flex items-center justify-between p-2 rounded"
-                  style={{ background: "var(--surface-2)" }}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "40px 1fr 80px",
+                    padding: "8px 12px",
+                    borderBottom: "1px solid var(--border)",
+                    alignItems: "center",
+                  }}
                 >
+                  <span className="font-mono" style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                    {s.label}
+                  </span>
                   <span
-                    className="text-xs truncate flex-1 mr-3"
-                    style={{ color: "var(--text-muted)" }}
+                    style={{
+                      fontSize: 12,
+                      color: "var(--text-secondary)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      paddingRight: 12,
+                    }}
                   >
                     {s.description}
                   </span>
-                  <span
-                    className="text-sm font-bold font-mono shrink-0"
-                    style={{ color: "var(--text-primary)" }}
-                  >
+                  <span className="font-mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--text-white)", textAlign: "right" }}>
                     {(s.mean * 100).toFixed(1)}%
                   </span>
                 </div>
               ))}
-            </div>
 
-            {/* Ranking */}
-            {portfolioResult && (
-              <div
-                className="space-y-3 border-t pt-4"
-                style={{ borderColor: "var(--border)" }}
-              >
-                <p className="text-xs leading-relaxed" style={{ color: "var(--text-muted)" }}>
-                  {portfolioResult.recommendation_basis}
-                </p>
-
-                <div className="space-y-2">
-                  {portfolioResult.ranked_labels.map((label, i) => {
-                    const scenario = portfolio.find((s) => s.label === label);
-                    const score = portfolioResult.ranked_scores[i];
-                    const isUpside = label === portfolioResult.highest_upside;
-                    const isFloor = label === portfolioResult.lowest_downside;
-                    return (
-                      <div
-                        key={label}
-                        className="flex items-center gap-3 p-2 rounded"
-                        style={{ background: "var(--surface-2)" }}
-                      >
-                        <span
-                          className="text-lg font-bold w-6 text-center"
-                          style={{ color: i === 0 ? "#34d399" : "var(--text-muted)" }}
-                        >
-                          {i + 1}
-                        </span>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm" style={{ color: "var(--text-secondary)" }}>
-                              {label}
-                            </span>
-                            {isUpside && (
-                              <span
-                                className="text-xs px-1.5 py-0.5 rounded"
-                                style={{ background: "#0d3d2e", color: "#34d399" }}
-                              >
-                                ↑ highest upside
+              {portfolioResult && (
+                <div style={{ padding: "14px 12px", borderTop: "1px solid var(--border-mid)", background: "var(--surface-2)" }}>
+                  <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 12 }}>{portfolioResult.recommendation_basis}</p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {portfolioResult.ranked_labels.map((label, i) => {
+                      const s = portfolio.find((x) => x.label === label);
+                      return (
+                        <div key={label} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <span
+                            className="font-mono"
+                            style={{
+                              fontSize: 14,
+                              fontWeight: 700,
+                              color: i === 0 ? "var(--text-white)" : "var(--text-muted)",
+                              width: 20,
+                            }}
+                          >
+                            {i + 1}
+                          </span>
+                          <span className="font-mono" style={{ fontSize: 11, color: "var(--text-secondary)", flex: 1 }}>
+                            {label} — {s?.description}
+                          </span>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            {label === portfolioResult.highest_upside && (
+                              <span className="font-mono" style={{ fontSize: 9, color: RISK_COLORS.favorable, letterSpacing: "0.1em" }}>
+                                UPSIDE
                               </span>
                             )}
-                            {isFloor && !isUpside && (
-                              <span
-                                className="text-xs px-1.5 py-0.5 rounded"
-                                style={{ background: "#1e3a6e", color: "#4f8ef7" }}
-                              >
-                                ↓ best floor
+                            {label === portfolioResult.lowest_downside && label !== portfolioResult.highest_upside && (
+                              <span className="font-mono" style={{ fontSize: 9, color: "var(--text-secondary)", letterSpacing: "0.1em" }}>
+                                FLOOR
                               </span>
                             )}
                           </div>
-                          <p
-                            className="text-xs truncate"
-                            style={{ color: "var(--text-muted)" }}
-                          >
-                            {scenario?.description}
-                          </p>
                         </div>
-                        <span
-                          className="text-xs font-mono"
-                          style={{ color: "var(--text-muted)" }}
-                        >
-                          {(score * 100).toFixed(1)}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {portfolioResult.dominance_pairs.filter((p) => p.dominates).length > 0 && (
-                  <div
-                    className="text-xs border-t pt-3"
-                    style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}
-                  >
-                    <span
-                      className="font-semibold"
-                      style={{ color: "var(--text-label)" }}
-                    >
-                      Stochastic dominance:{" "}
-                    </span>
-                    {portfolioResult.dominance_pairs
-                      .filter((p) => p.dominates)
-                      .map((p) => `${p.scenario_a} dominates ${p.scenario_b}`)
-                      .join(", ")}
+                      );
+                    })}
                   </div>
-                )}
-              </div>
-            )}
-          </div>
+                  {portfolioResult.dominance_pairs.some((p) => p.dominates) && (
+                    <p className="font-mono" style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 12, lineHeight: 1.6 }}>
+                      Stochastic dominance:{" "}
+                      {portfolioResult.dominance_pairs
+                        .filter((p) => p.dominates)
+                        .map((p) => `${p.scenario_a} ≻ ${p.scenario_b}`)
+                        .join(", ")}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </section>
         )}
-      </div>
 
-      {/* ── Footer ───────────────────────────────────────────────────────────── */}
-      <div
-        className="mt-12 pt-4 border-t flex justify-center gap-8"
-        style={{ borderColor: "var(--border)" }}
-      >
-        <Link
-          href="/model-card"
-          className="text-xs transition-colors"
-          style={{ color: "var(--text-muted)" }}
-          onMouseEnter={(e) =>
-            (e.currentTarget.style.color = "var(--text-secondary)")
-          }
-          onMouseLeave={(e) =>
-            (e.currentTarget.style.color = "var(--text-muted)")
-          }
+        {/* ── Footer ───────────────────────────────────────────────────────── */}
+        <footer
+          style={{
+            borderTop: "1px solid var(--border)",
+            paddingTop: 20,
+            display: "flex",
+            justifyContent: "center",
+            gap: 32,
+          }}
         >
-          Model Card (Mitchell et al., 2019) →
-        </Link>
-        <Link
-          href="/api-docs"
-          className="text-xs transition-colors"
-          style={{ color: "var(--text-muted)" }}
-          onMouseEnter={(e) =>
-            (e.currentTarget.style.color = "var(--text-secondary)")
-          }
-          onMouseLeave={(e) =>
-            (e.currentTarget.style.color = "var(--text-muted)")
-          }
-        >
-          API Docs →
-        </Link>
+          {[
+            { href: "/model-card", label: "Model Card" },
+            { href: "/api-docs", label: "API Reference" },
+            { href: "/calibration", label: "Calibration" }, // NEW
+          ].map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className="font-serif"
+              style={{
+                fontSize: 11,
+                fontStyle: "italic",
+                color: "var(--text-muted)",
+                letterSpacing: "0.06em",
+                textDecoration: "none",
+                transition: "color 120ms",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-secondary)")}
+              onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
+            >
+              {link.label}
+            </Link>
+          ))}
+        </footer>
       </div>
     </main>
   );
