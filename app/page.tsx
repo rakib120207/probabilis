@@ -12,9 +12,20 @@ import { saveToHistory, StoredScenario } from "@/lib/storage";
 type ExtractionResult = {
   suggested_probability: number;
   suggested_confidence: number;
+  suggested_risk: number;            // NEW — auto-populates risk slider
+  risk_factors: Array<{              // NEW — pre-populates copula panel
+    name: string;
+    probability: number;
+    confidence: number;
+    type: string;
+    description: string;
+  }>;
+  uncertainty_type: string;          // NEW — "epistemic-dominant" | "aleatory-dominant"
+  domain: string;                    // NEW — "academic" | "career" | etc.
   reasoning: string;
   extraction_mode: string;
 };
+
 type SimulationResult = {
   mean: number;
   variance: number;
@@ -142,6 +153,33 @@ export type CopulaResult = {
   copula_type: string;
 };
 
+// ── v3.0 Decision types ─────────────────────────────────────────────────────
+type ThresholdPoint = {
+  threshold: number;
+  action: string;
+  expected_utility: number;
+  probability_above: number;
+  eu_margin: number;
+};
+
+type DecisionResult = {
+  recommended_action: string;
+  decision_confidence: string;
+  expected_utility_proceed: number;
+  expected_utility_abandon: number;
+  optimal_expected_utility: number;
+  expected_regret: number;
+  vpi: number;
+  break_even_probability: number;
+  probability_above_threshold: number;
+  threshold_used: number;
+  eu_margin: number;
+  regret_interpretation: string;
+  vpi_interpretation: string;
+  action_interpretation: string;
+  threshold_sensitivity: ThresholdPoint[];
+};
+
 // ── Utilities ──────────────────────────────────────────────────────────────
 function interpolateDensity(xPct: number, histX: number[], histY: number[]): number {
   const xProb = xPct / 100;
@@ -194,9 +232,11 @@ function HR() {
 function RiskSliderSection({
   risk,
   setRisk,
+  baseProbability,
 }: {
   risk: number;
   setRisk: (v: number) => void;
+  baseProbability: number;
 }) {
   return (
     <div>
@@ -228,8 +268,8 @@ function RiskSliderSection({
       />
       <p className="font-mono" style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 6 }}>
         {risk > 0
-          ? `Adjusted p₀ = ${((1 - risk) * 100).toFixed(0)}% of stated base probability`
-          : "No risk adjustment applied — base probability used directly"}
+          ? `p_adj = ${(baseProbability * (1 - risk) * 100).toFixed(1)}% (auto-extracted from scenario context)`
+          : "No external risk detected in scenario description"}
       </p>
     </div>
   );
@@ -307,15 +347,26 @@ function RiskAdjustmentDisplay({
 function CopulaPanel({
   apiUrl,
   baseProbability,
+  initialFactors,
 }: {
   apiUrl: string;
   baseProbability: number;
+  initialFactors?: ExtractionResult["risk_factors"];
 }) {
   const [open, setOpen] = useState(false);
-  const [factors, setFactors] = useState<RiskFactor[]>([
-    { name: "Risk Factor 1", probability: 0.25, confidence: 0.60 },
-    { name: "Risk Factor 2", probability: 0.20, confidence: 0.70 },
-  ]);
+  const [factors, setFactors] = useState<RiskFactor[]>(() => {
+    if (initialFactors && initialFactors.length > 0) {
+      return initialFactors.map(f => ({
+        name: f.name,
+        probability: f.probability,
+        confidence: f.confidence ?? 0.60,
+      }));
+    }
+    return [
+      { name: "Risk Factor 1", probability: 0.25, confidence: 0.60 },
+      { name: "Risk Factor 2", probability: 0.20, confidence: 0.70 },
+    ];
+  });
   const [correlation, setCorrelation] = useState(0.4);
   const [result, setResult] = useState<CopulaResult | null>(null);
   const [running, setRunning] = useState(false);
@@ -538,6 +589,209 @@ function CopulaPanel({
   );
 }
 
+function DecisionPanel({
+  result,
+  threshold,
+  setThreshold,
+  onRerun,
+}: {
+  result: DecisionResult;
+  threshold: number;
+  setThreshold: (v: number) => void;
+  onRerun: () => void;
+}) {
+  const ACTION_COLORS: Record<string, string> = {
+    proceed: "#00e87a",
+    abandon: "#ff3b3b",
+    gather_more_info: "#d4c000",
+  };
+  const ACTION_LABELS: Record<string, string> = {
+    proceed: "PROCEED",
+    abandon: "ABANDON",
+    gather_more_info: "GATHER INFO FIRST",
+  };
+
+  const color = ACTION_COLORS[result.recommended_action] ?? "#909090";
+  const label = ACTION_LABELS[result.recommended_action] ?? result.recommended_action.toUpperCase();
+
+  return (
+    <section style={{ marginBottom: 28 }}>
+      <Label>Decision Analysis — Expected Utility &amp; Regret</Label>
+      <div
+        style={{
+          border: `1px solid ${color}44`,
+          background: "var(--surface-1)",
+        }}
+      >
+        <div
+          style={{
+            padding: "12px 14px",
+            borderBottom: `1px solid ${color}22`,
+            background: `${color}0d`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <span
+              className="font-mono"
+              style={{
+                fontSize: 13,
+                fontWeight: 700,
+                letterSpacing: "0.12em",
+                color,
+              }}
+            >
+              {label}
+            </span>
+            <span
+              className="font-mono"
+              style={{
+                fontSize: 9,
+                letterSpacing: "0.1em",
+                color: "var(--text-muted)",
+                border: "1px solid var(--border-mid)",
+                padding: "2px 8px",
+              }}
+            >
+              {result.decision_confidence.toUpperCase()} CONFIDENCE
+            </span>
+          </div>
+          <span className="font-mono" style={{ fontSize: 10, color: "var(--text-muted)" }}>
+            τ = {(result.threshold_used * 100).toFixed(0)}%
+          </span>
+        </div>
+
+        <div style={{ padding: "14px" }}>
+          <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.65, marginBottom: 14 }}>
+            {result.action_interpretation}
+          </p>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 1, background: "var(--border)", marginBottom: 14 }}>
+            {[
+              { label: "EU(proceed)", value: result.expected_utility_proceed.toFixed(3), note: "vs 0 baseline" },
+              { label: "P(above τ)", value: `${(result.probability_above_threshold * 100).toFixed(1)}%`, note: `at ${(result.threshold_used * 100).toFixed(0)}%` },
+              { label: "Regret", value: result.expected_regret.toFixed(3), note: "expected loss" },
+              { label: "VPI", value: result.vpi.toFixed(3), note: "info value" },
+            ].map((m) => (
+              <div key={m.label} style={{ background: "var(--surface-2)", padding: "10px 8px", textAlign: "center" }}>
+                <p className="font-mono" style={{ fontSize: 14, fontWeight: 700, color: "var(--text-white)", margin: 0 }}>
+                  {m.value}
+                </p>
+                <p className="font-serif" style={{ fontSize: 9, fontStyle: "italic", color: "var(--text-muted)", marginTop: 4 }}>
+                  {m.label}
+                </p>
+                <p className="font-mono" style={{ fontSize: 9, color: "var(--text-dim)", marginTop: 2 }}>
+                  {m.note}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ borderLeft: "2px solid var(--border-hi)", paddingLeft: 12, marginBottom: 12 }}>
+            <p className="font-mono" style={{ fontSize: 9, color: "var(--text-muted)", letterSpacing: "0.12em", marginBottom: 4 }}>
+              REGRET ANALYSIS
+            </p>
+            <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
+              {result.regret_interpretation}
+            </p>
+          </div>
+
+          <div
+            style={{
+              borderLeft: `2px solid ${result.vpi > 0.08 ? "#d4c000" : "var(--border-hi)"}`,
+              paddingLeft: 12,
+              marginBottom: 16,
+            }}
+          >
+            <p
+              className="font-mono"
+              style={{
+                fontSize: 9,
+                color: result.vpi > 0.08 ? "#d4c000" : "var(--text-muted)",
+                letterSpacing: "0.12em",
+                marginBottom: 4,
+              }}
+            >
+              VALUE OF PERFECT INFORMATION
+            </p>
+            <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
+              {result.vpi_interpretation}
+            </p>
+          </div>
+
+          <p className="font-mono" style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 16 }}>
+            Break-even probability:{" "}
+            <span style={{ color: "var(--text-white)", fontWeight: 700 }}>
+              {(result.break_even_probability * 100).toFixed(1)}%
+            </span>
+            &nbsp;— EU(proceed) = EU(abandon) at this threshold
+          </p>
+
+          <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+              <span className="font-mono" style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                Decision threshold τ
+              </span>
+              <span className="font-mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--text-white)" }}>
+                {(threshold * 100).toFixed(0)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0.10}
+              max={0.90}
+              step={0.05}
+              value={threshold}
+              onChange={(e) => setThreshold(parseFloat(e.target.value))}
+              style={{ marginBottom: 10 }}
+            />
+            <button
+              className="btn-outline"
+              style={{ width: "100%", marginBottom: 14 }}
+              onClick={onRerun}
+            >
+              ↺ recompute at τ = {(threshold * 100).toFixed(0)}%
+            </button>
+
+            <p className="font-mono" style={{ fontSize: 9, color: "var(--text-muted)", letterSpacing: "0.1em", marginBottom: 8 }}>
+              THRESHOLD SENSITIVITY — decision at different proceed thresholds
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: `repeat(${result.threshold_sensitivity.length}, 1fr)`, gap: 1, background: "var(--border)" }}>
+              {result.threshold_sensitivity.map((pt) => {
+                const isActive = Math.abs(pt.threshold - result.threshold_used) < 0.01;
+                const ptColor = pt.action === "proceed" ? "#00c060" : "#ff3b3b";
+                return (
+                  <div
+                    key={pt.threshold}
+                    style={{
+                      background: isActive ? `${ptColor}18` : "var(--surface-2)",
+                      padding: "8px 4px",
+                      textAlign: "center",
+                      borderBottom: isActive ? `2px solid ${ptColor}` : "2px solid transparent",
+                    }}
+                  >
+                    <p className="font-mono" style={{ fontSize: 9, color: "var(--text-muted)", margin: 0 }}>
+                      {(pt.threshold * 100).toFixed(0)}%
+                    </p>
+                    <p className="font-mono" style={{ fontSize: 9, fontWeight: 700, color: ptColor, margin: "2px 0 0" }}>
+                      {pt.action === "proceed" ? "GO" : "NO"}
+                    </p>
+                    <p className="font-mono" style={{ fontSize: 8, color: "var(--text-dim)", margin: "1px 0 0" }}>
+                      {(pt.probability_above * 100).toFixed(0)}%
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ── Main Component ─────────────────────────────────────────────────────────
 export default function Home() {
   const SESSION_KEY = "probabilis_session_v1";
@@ -574,6 +828,11 @@ export default function Home() {
   const [analyzeStatus, setAnalyzeStatus] = useState("");
   const [risk, setRisk] = useState<number>(0.0);
   const abortRef = useRef<AbortController | null>(null);
+
+  // v3.0 new state
+  const [decisionResult, setDecisionResult] = useState<DecisionResult | null>(null);
+  const [decisionThreshold, setDecisionThreshold] = useState(0.5);
+  const [extractedRiskFactors, setExtractedRiskFactors] = useState<ExtractionResult["risk_factors"]>([]);
 
   // ── Init ─────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -628,6 +887,7 @@ export default function Home() {
     setStressResult(null);
     setAssumptions(null);
     setError("");
+    setDecisionResult(null);
     const timer = setTimeout(() => setAnalyzeStatus("analyzing uncertainty signals..."), 1500);
     try {
       const res = await fetch(`${API_URL}/extract`, {
@@ -643,6 +903,9 @@ export default function Home() {
       setReasoning(data.reasoning);
       setReasoningFresh(true);
       setExtractionMode(data.extraction_mode);
+      // v3.0 additions
+      setRisk(data.suggested_risk ?? 0);
+      setExtractedRiskFactors(data.risk_factors ?? []);
       try {
         const ar = await fetch(`${API_URL}/assumptions`, {
           method: "POST",
@@ -674,6 +937,7 @@ export default function Home() {
     abortRef.current?.abort();
     setSimulating(true);
     setError("");
+    setDecisionResult(null);
     try {
       const res = await fetch(`${API_URL}/simulate`, {
         method: "POST",
@@ -705,6 +969,9 @@ export default function Home() {
           eviu: data.eviu ?? 0,
           uncertainty_type: data.uncertainty_type ?? "aleatory-dominant",
           variance_reduction_pct: data.variance_reduction_pct ?? 0,
+          aleatory_fraction: data.aleatory_fraction,
+          epistemic_fraction: data.epistemic_fraction,
+          distribution_type: data.distribution_type,
         },
         extractionMode,
         timestamp: new Date().toLocaleTimeString(),
@@ -764,6 +1031,24 @@ export default function Home() {
         });
         if (sumr.ok) setDecisionSummary(await sumr.json());
       } catch {}
+      // v3.0: Decision analysis
+      try {
+        const dr = await fetch(`${API_URL}/decision`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            base_probability: baseProbability,
+            confidence,
+            mean: data.mean,
+            std_dev: data.std_dev,
+            confidence_interval_low: data.confidence_interval_low,
+            confidence_interval_high: data.confidence_interval_high,
+            threshold: decisionThreshold,
+            trials: 10000,
+          }),
+        });
+        if (dr.ok) setDecisionResult(await dr.json());
+      } catch {}
     } catch {
       setError("Simulation failed. Check your backend connection.");
     } finally {
@@ -778,7 +1063,7 @@ export default function Home() {
         JSON.stringify(
           {
             tool: "Probabilis",
-            version: "1.0",
+            version: "3.0",
             exported_at: new Date().toISOString(),
             methodology: {
               distribution: "Beta",
@@ -803,6 +1088,7 @@ export default function Home() {
     a.download = `probabilis-${new Date().toISOString().split("T")[0]}.json`;
     a.click();
   }
+
   async function exportLatex_FIXED(hist: StoredScenario[]) {
     if (!hist.length) return;
     try {
@@ -828,6 +1114,32 @@ export default function Home() {
             epistemic_fraction: e.result.epistemic_fraction ?? 0.4,
             extraction_mode: e.extractionMode,
             timestamp: e.timestamp,
+            // v3.0 extended fields
+            risk: e.result.risk ?? null,
+            adjusted_probability: e.result.adjusted_probability ?? null,
+            distribution_type: e.result.distribution_type ?? null,
+            domain: e.result.domain ?? null,
+            decision_action: e.result.decision_action ?? null,
+            decision_eu_proceed: e.result.decision_eu_proceed ?? null,
+            decision_eu_abandon: e.result.decision_eu_abandon ?? null,
+            decision_regret: e.result.decision_regret ?? null,
+            decision_vpi: e.result.decision_vpi ?? null,
+            decision_break_even: e.result.decision_break_even ?? null,
+            sensitivity_dominant: e.result.sensitivity_dominant ?? null,
+            sensitivity_prob_impact: e.result.sensitivity_prob_impact ?? null,
+            sensitivity_conf_impact: e.result.sensitivity_conf_impact ?? null,
+            sensitivity_prob_rho: e.result.sensitivity_prob_rho ?? null,
+            sensitivity_conf_rho: e.result.sensitivity_conf_rho ?? null,
+            sensitivity_prob_variance_pct: e.result.sensitivity_prob_variance_pct ?? null,
+            sensitivity_conf_variance_pct: e.result.sensitivity_conf_variance_pct ?? null,
+            sensitivity_robustness: e.result.sensitivity_robustness ?? null,
+            stress_fragile: e.result.stress_fragile ?? null,
+            stress_frontier_pp: e.result.stress_frontier_pp ?? null,
+            stress_robust_range_pp: e.result.stress_robust_range_pp ?? null,
+            risk_level: e.result.risk_level ?? null,
+            risk_label: e.result.risk_label ?? null,
+            risk_headline: e.result.risk_headline ?? null,
+            risk_action: e.result.risk_action ?? null,
           })),
         }),
       });
@@ -939,6 +1251,11 @@ export default function Home() {
               >
                 [{extractionMode.startsWith("ai") ? "LLAMA 3.3 70B" : "LINGUISTIC FALLBACK"}]
               </span>
+              {extractedRiskFactors.length > 0 && (
+                <span className="font-mono" style={{ marginLeft: 8, fontSize: 9, color: "var(--text-muted)", letterSpacing: "0.08em" }}>
+                  [DOMAIN: {extractedRiskFactors[0]?.type ?? "general"}]
+                </span>
+              )}
             </Label>
             <div
               style={{
@@ -1096,7 +1413,7 @@ export default function Home() {
               </p>
             </div>
             {/* Risk slider */}
-            <RiskSliderSection risk={risk} setRisk={setRisk} />
+            <RiskSliderSection risk={risk} setRisk={setRisk} baseProbability={baseProbability} />
           </div>
         </section>
 
@@ -1528,6 +1845,35 @@ export default function Home() {
               </section>
             )}
 
+            {/* Decision Panel (v3.0) */}
+            {decisionResult && (
+              <DecisionPanel
+                result={decisionResult}
+                threshold={decisionThreshold}
+                setThreshold={setDecisionThreshold}
+                onRerun={async () => {
+                  if (!result) return;
+                  try {
+                    const dr = await fetch(`${API_URL}/decision`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        base_probability: baseProbability,
+                        confidence,
+                        mean: result.mean,
+                        std_dev: result.std_dev,
+                        confidence_interval_low: result.confidence_interval_low,
+                        confidence_interval_high: result.confidence_interval_high,
+                        threshold: decisionThreshold,
+                        trials: 10000,
+                      }),
+                    });
+                    if (dr.ok) setDecisionResult(await dr.json());
+                  } catch {}
+                }}
+              />
+            )}
+
             {/* Stress test */}
             {stressResult && (
               <section style={{ marginBottom: 28 }}>
@@ -1775,7 +2121,7 @@ export default function Home() {
             </section>
 
             {/* Copula Panel */}
-            <CopulaPanel apiUrl={API_URL} baseProbability={baseProbability} />
+            <CopulaPanel apiUrl={API_URL} baseProbability={baseProbability} initialFactors={extractedRiskFactors} />
 
             {/* Decision Summary */}
             {decisionSummary && (

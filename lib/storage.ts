@@ -2,8 +2,7 @@
 // Scenario persistence via browser localStorage.
 // All data stays on the user's machine — no server storage.
 //
-// Change: added aleatory_fraction and epistemic_fraction to StoredScenario.result
-// so that the LaTeX export uses actual computed values instead of hardcoded 0.6/0.4.
+// v3.0: Extended result fields for full report export (risk, decision, sensitivity, stress).
 
 const HISTORY_KEY = "probabilis_history_v1";
 
@@ -22,8 +21,34 @@ export type StoredScenario = {
     eviu: number;
     uncertainty_type: string;
     variance_reduction_pct: number;
-    aleatory_fraction?: number;   // actual computed fraction from simulation
-    epistemic_fraction?: number;  // actual computed fraction from simulation
+    aleatory_fraction?: number;
+    epistemic_fraction?: number;
+    // v3 additions
+    risk?: number;
+    adjusted_probability?: number;
+    distribution_type?: string;
+    domain?: string;
+    decision_action?: string;
+    decision_eu_proceed?: number;
+    decision_eu_abandon?: number;
+    decision_regret?: number;
+    decision_vpi?: number;
+    decision_break_even?: number;
+    sensitivity_dominant?: string;
+    sensitivity_prob_impact?: number;
+    sensitivity_conf_impact?: number;
+    sensitivity_prob_rho?: number;
+    sensitivity_conf_rho?: number;           // ← ADDED
+    sensitivity_prob_variance_pct?: number;
+    sensitivity_conf_variance_pct?: number;
+    sensitivity_robustness?: string;
+    stress_fragile?: boolean;
+    stress_frontier_pp?: number;
+    stress_robust_range_pp?: number;
+    risk_level?: string;
+    risk_label?: string;
+    risk_headline?: string;
+    risk_action?: string;
   };
   extractionMode: string;
   timestamp: string;
@@ -56,7 +81,7 @@ export function clearHistory(): void {
 export function exportSession(scenarios: StoredScenario[]): void {
   const payload = {
     tool: "Probabilis",
-    version: "1.0",
+    version: "3.0",
     exported_at: new Date().toISOString(),
     methodology: {
       distribution: "Beta",
