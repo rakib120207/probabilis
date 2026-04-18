@@ -1,5 +1,4 @@
 "use client";
-
 import Link from "next/link";
 import { useState, useEffect, useRef, useMemo } from "react";
 import {
@@ -10,14 +9,12 @@ import { buildLocalCurve } from "@/lib/betaPdf";
 import { saveToHistory, StoredScenario } from "@/lib/storage";
 
 // ── Types ──────────────────────────────────────────────────────────────────
-
 type ExtractionResult = {
   suggested_probability: number;
   suggested_confidence: number;
   reasoning: string;
   extraction_mode: string;
 };
-
 type SimulationResult = {
   mean: number;
   variance: number;
@@ -34,10 +31,9 @@ type SimulationResult = {
   epistemic_fraction?: number;
   uncertainty_type?: string;
   eviu?: number;
-  distribution_type?: string; // new
-  risk_adjusted_mean?: number; // new
+  distribution_type?: string;
+  risk_adjusted_mean?: number;
 };
-
 type SensitivityResult = {
   probability_sensitivity: number;
   confidence_sensitivity: number;
@@ -45,13 +41,11 @@ type SensitivityResult = {
   confidence_impact: number;
   interpretation: string;
 };
-
 type SummarizeResult = {
   summary: string;
   key_insight: string;
   decision_framing: string;
 };
-
 type Assumption = {
   id: string;
   label: string;
@@ -59,19 +53,16 @@ type Assumption = {
   weight: number;
   description: string;
 };
-
 type AssumptionsResult = {
   assumptions: Assumption[];
   synthesis_note: string;
 };
-
 type RiskProfile = {
   level: string;
   label: string;
   color: string;
   score: number;
 };
-
 type InterpretationResult = {
   risk_profile: RiskProfile;
   headline: string;
@@ -82,7 +73,6 @@ type InterpretationResult = {
   confidence_class: string;
   spread_class: string;
 };
-
 type StressPoint = {
   shift_pp: number;
   mean: number;
@@ -90,14 +80,12 @@ type StressPoint = {
   ci_high: number;
   risk_category: string;
 };
-
 type StressResult = {
   stress_points: StressPoint[];
   fragility_frontier_pp: number | null;
   robust_range_pp: number;
   is_fragile: boolean;
 };
-
 type PortfolioScenario = {
   label: string;
   description: string;
@@ -110,7 +98,6 @@ type PortfolioScenario = {
   eviu: number;
   uncertainty_type: string;
 };
-
 type PortfolioResult = {
   ranked_labels: string[];
   ranked_scores: number[];
@@ -125,7 +112,6 @@ type PortfolioResult = {
   highest_upside: string;
   lowest_downside: string;
 };
-
 type ChartPoint = {
   x?: number;
   probability?: number;
@@ -140,7 +126,6 @@ export type RiskFactor = {
   probability: number;
   confidence: number;
 };
-
 export type CopulaResult = {
   mean: number;
   std_dev: number;
@@ -158,7 +143,6 @@ export type CopulaResult = {
 };
 
 // ── Utilities ──────────────────────────────────────────────────────────────
-
 function interpolateDensity(xPct: number, histX: number[], histY: number[]): number {
   const xProb = xPct / 100;
   const margin = ((histX[histX.length - 1] - histX[0]) / histX.length) * 2;
@@ -171,7 +155,6 @@ function interpolateDensity(xPct: number, histX: number[], histY: number[]): num
   }
   return 0;
 }
-
 function buildComparisonData(a: SimulationResult, b: SimulationResult | null) {
   return Array.from({ length: 101 }, (_, x) => ({
     x,
@@ -179,7 +162,6 @@ function buildComparisonData(a: SimulationResult, b: SimulationResult | null) {
     densityB: b ? interpolateDensity(x, b.histogram_x, b.histogram_y) : undefined,
   }));
 }
-
 function recomputeFromAssumptions(list: Assumption[], w: Record<string, number>): number {
   let p = 0.5;
   list.forEach((a) => {
@@ -188,7 +170,6 @@ function recomputeFromAssumptions(list: Assumption[], w: Record<string, number>)
   });
   return Math.max(0.05, Math.min(0.95, Math.round(p * 100) / 100));
 }
-
 const RISK_COLORS: Record<string, string> = {
   critical: "#ff3b3b",
   high: "#ff7a00",
@@ -198,7 +179,6 @@ const RISK_COLORS: Record<string, string> = {
 };
 
 // ── Sub-components ─────────────────────────────────────────────────────────
-
 function Label({ children }: { children: React.ReactNode }) {
   return (
     <p className="section-label" style={{ marginBottom: 10 }}>
@@ -206,13 +186,11 @@ function Label({ children }: { children: React.ReactNode }) {
     </p>
   );
 }
-
 function HR() {
   return <div className="rule" style={{ margin: "20px 0" }} />;
 }
 
-// ── New v2.0 Components ────────────────────────────────────────────────────
-
+// ── v2.0 Components ────────────────────────────────────────────────────────
 function RiskSliderSection({
   risk,
   setRisk,
@@ -387,7 +365,6 @@ function CopulaPanel({
         <span>⊕ CORRELATED RISK ANALYSIS — Gaussian Copula</span>
         <span>{open ? "▾" : "▸"}</span>
       </button>
-
       {open && (
         <div
           style={{
@@ -407,10 +384,8 @@ function CopulaPanel({
               lineHeight: 1.6,
             }}
           >
-            Models correlated risks via Gaussian copula. Bad events cluster — market crashes make all
-            risks more likely simultaneously. Without copulas, tail risk is underestimated.
+            Models correlated risks via Gaussian copula. Bad events cluster — market crashes make all risks more likely simultaneously. Without copulas, tail risk is underestimated.
           </p>
-
           {factors.map((f, i) => (
             <div key={i} style={{ marginBottom: 12, padding: "10px", background: "var(--surface-2)" }}>
               <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
@@ -447,7 +422,7 @@ function CopulaPanel({
               </div>
               <div style={{ display: "flex", gap: 16, fontSize: 11 }}>
                 <span style={{ color: "var(--text-muted)", fontFamily: "monospace" }}>
-                  p={`${(f.probability * 100).toFixed(0)}`}%{" "}
+                  p={(f.probability * 100).toFixed(0)}%{" "}
                 </span>
                 <input
                   type="range"
@@ -465,7 +440,6 @@ function CopulaPanel({
               </div>
             </div>
           ))}
-
           {factors.length < 4 && (
             <button
               onClick={() =>
@@ -488,7 +462,6 @@ function CopulaPanel({
               + add risk factor
             </button>
           )}
-
           <div style={{ marginBottom: 14 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
               <span style={{ fontFamily: "monospace", fontSize: 10, color: "var(--text-muted)" }}>
@@ -507,7 +480,6 @@ function CopulaPanel({
               onChange={(e) => setCorrelation(parseFloat(e.target.value))}
             />
           </div>
-
           <button
             onClick={runCopula}
             disabled={running || factors.length < 2}
@@ -526,7 +498,6 @@ function CopulaPanel({
           >
             {running ? "RUNNING COPULA SIMULATION..." : "RUN CORRELATED SIMULATION"}
           </button>
-
           {result && (
             <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1, background: "var(--border)" }}>
@@ -556,8 +527,7 @@ function CopulaPanel({
               </div>
               {result.correlation_effect > 0.01 && (
                 <p style={{ fontFamily: "Georgia, serif", fontSize: 12, fontStyle: "italic", color: "var(--risk-high)", lineHeight: 1.6 }}>
-                  ↳ Correlation inflates downside risk by {(result.correlation_effect * 100).toFixed(1)}pp vs independent assumption. Tail
-                  events cluster.
+                  ↳ Correlation inflates downside risk by {(result.correlation_effect * 100).toFixed(1)}pp vs independent assumption. Tail events cluster.
                 </p>
               )}
             </div>
@@ -569,11 +539,9 @@ function CopulaPanel({
 }
 
 // ── Main Component ─────────────────────────────────────────────────────────
-
 export default function Home() {
   const SESSION_KEY = "probabilis_session_v1";
   const HISTORY_KEY = "probabilis_history_v1";
-
   const API_URL = useMemo(() => {
     const url = process.env.NEXT_PUBLIC_API_URL;
     if (!url) return "https://web-production-810f7.up.railway.app";
@@ -587,7 +555,6 @@ export default function Home() {
   const [reasoning, setReasoning] = useState("");
   const [extractionMode, setExtractionMode] = useState("");
   const [reasoningFresh, setReasoningFresh] = useState(false);
-
   const [result, setResult] = useState<SimulationResult | null>(null);
   const [sensitivity, setSensitivity] = useState<SensitivityResult | null>(null);
   const [decisionSummary, setDecisionSummary] = useState<SummarizeResult | null>(null);
@@ -596,23 +563,16 @@ export default function Home() {
   const [assumptions, setAssumptions] = useState<AssumptionsResult | null>(null);
   const [editedWeights, setEditedWeights] = useState<Record<string, number>>({});
   const [showAssumptions, setShowAssumptions] = useState(false);
-
   const [portfolio, setPortfolio] = useState<PortfolioScenario[]>([]);
   const [portfolioResult, setPortfolioResult] = useState<PortfolioResult | null>(null);
-
   const [pinnedResult, setPinnedResult] = useState<SimulationResult | null>(null);
   const [pinnedDescription, setPinnedDescription] = useState("");
-
   const [history, setHistory] = useState<StoredScenario[]>([]);
-
   const [extracting, setExtracting] = useState(false);
   const [simulating, setSimulating] = useState(false);
   const [error, setError] = useState("");
   const [analyzeStatus, setAnalyzeStatus] = useState("");
-
-  // ── New state for v2.0 ──────────────────────────────────────────────────
   const [risk, setRisk] = useState<number>(0.0);
-
   const abortRef = useRef<AbortController | null>(null);
 
   // ── Init ─────────────────────────────────────────────────────────────────
@@ -632,7 +592,7 @@ export default function Home() {
     return () => {
       abortRef.current?.abort();
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [API_URL]);
 
   // ── Session persistence ───────────────────────────────────────────────────
   useEffect(() => {
@@ -657,7 +617,6 @@ export default function Home() {
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-
     setExtracting(true);
     setAnalyzeStatus("connecting to AI...");
     setReasoning("");
@@ -669,9 +628,7 @@ export default function Home() {
     setStressResult(null);
     setAssumptions(null);
     setError("");
-
     const timer = setTimeout(() => setAnalyzeStatus("analyzing uncertainty signals..."), 1500);
-
     try {
       const res = await fetch(`${API_URL}/extract`, {
         method: "POST",
@@ -686,7 +643,6 @@ export default function Home() {
       setReasoning(data.reasoning);
       setReasoningFresh(true);
       setExtractionMode(data.extraction_mode);
-
       try {
         const ar = await fetch(`${API_URL}/assumptions`, {
           method: "POST",
@@ -718,7 +674,6 @@ export default function Home() {
     abortRef.current?.abort();
     setSimulating(true);
     setError("");
-
     try {
       const res = await fetch(`${API_URL}/simulate`, {
         method: "POST",
@@ -727,15 +682,14 @@ export default function Home() {
           description,
           base_probability: baseProbability,
           confidence,
-          risk: risk, // new
+          risk: risk,
           trials: 10000,
-          beta_scale: 50, // increased from 20 for v2.0
+          beta_scale: 50,
         }),
       });
       if (!res.ok) throw new Error(`${res.status}`);
       const data: SimulationResult = await res.json();
       setResult(data);
-
       const entry: StoredScenario = {
         id: Date.now() * 1000 + Math.floor(Math.random() * 1000),
         description: description.slice(0, 120) + (description.length > 120 ? "..." : ""),
@@ -759,7 +713,6 @@ export default function Home() {
       const updated = [entry, ...history].slice(0, 20);
       saveToHistory(entry);
       setHistory(updated);
-
       // Enrichment — sequential
       try {
         const sr = await fetch(`${API_URL}/sensitivity`, {
@@ -769,7 +722,6 @@ export default function Home() {
         });
         if (sr.ok) setSensitivity(await sr.json());
       } catch {}
-
       try {
         const str = await fetch(`${API_URL}/stress`, {
           method: "POST",
@@ -778,7 +730,6 @@ export default function Home() {
         });
         if (str.ok) setStressResult(await str.json());
       } catch {}
-
       try {
         const ir = await fetch(`${API_URL}/interpret`, {
           method: "POST",
@@ -798,7 +749,6 @@ export default function Home() {
         });
         if (ir.ok) setInterpretation(await ir.json());
       } catch {}
-
       try {
         const sumr = await fetch(`${API_URL}/summarize`, {
           method: "POST",
@@ -853,7 +803,6 @@ export default function Home() {
     a.download = `probabilis-${new Date().toISOString().split("T")[0]}.json`;
     a.click();
   }
-
   async function exportLatex_FIXED(hist: StoredScenario[]) {
     if (!hist.length) return;
     try {
@@ -900,7 +849,7 @@ export default function Home() {
   return (
     <main style={{ background: "var(--bg)", minHeight: "100vh", padding: "48px 24px 80px" }}>
       <div style={{ maxWidth: 680, margin: "0 auto" }}>
-        {/* ── Header ────────────────────────────────────────────────────── */}
+        {/* Header */}
         <header style={{ marginBottom: 48 }}>
           <h1
             className="font-serif"
@@ -929,7 +878,7 @@ export default function Home() {
           </p>
         </header>
 
-        {/* ── Scenario input ────────────────────────────────────────────── */}
+        {/* Scenario input */}
         <section style={{ marginBottom: 24 }}>
           <Label>Scenario Description</Label>
           <textarea
@@ -958,7 +907,7 @@ export default function Home() {
           )}
         </div>
 
-        {/* ── Error ──────────────────────────────────────────────────────── */}
+        {/* Error */}
         {error && (
           <div
             className="font-mono"
@@ -974,7 +923,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* ── AI Interpretation ────────────────────────────────────────── */}
+        {/* AI Interpretation */}
         {reasoning && reasoningFresh && (
           <section style={{ marginBottom: 32 }}>
             <Label>
@@ -1005,7 +954,7 @@ export default function Home() {
           </section>
         )}
 
-        {/* ── Assumption Audit ──────────────────────────────────────────── */}
+        {/* Assumption Audit */}
         {assumptions && (
           <section style={{ marginBottom: 32 }}>
             <button
@@ -1028,7 +977,6 @@ export default function Home() {
                 Assumption Audit — {assumptions.assumptions.length} factors
               </span>
             </button>
-
             {showAssumptions && (
               <div className="card" style={{ marginTop: 4 }}>
                 <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16, lineHeight: 1.6 }}>
@@ -1101,7 +1049,7 @@ export default function Home() {
           </section>
         )}
 
-        {/* ── Parameter Controls ────────────────────────────────────────── */}
+        {/* Parameter Controls */}
         <section style={{ marginBottom: 32 }}>
           <Label>Simulation Parameters</Label>
           <div className="card" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -1124,7 +1072,6 @@ export default function Home() {
                 onChange={(e) => setBaseProbability(parseFloat(e.target.value))}
               />
             </div>
-
             {/* Confidence */}
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
@@ -1148,8 +1095,7 @@ export default function Home() {
                 {((1 - baseProbability) * confidence * 20).toFixed(2)}&nbsp; (Beta distribution parameters)
               </p>
             </div>
-
-            {/* ── NEW: Risk slider ───────────────────────────────────────── */}
+            {/* Risk slider */}
             <RiskSliderSection risk={risk} setRisk={setRisk} />
           </div>
         </section>
@@ -1161,7 +1107,7 @@ export default function Home() {
           </button>
         </div>
 
-        {/* ── Results ─────────────────────────────────────────────────────── */}
+        {/* Results */}
         {result && (
           <div>
             <HR />
@@ -1171,8 +1117,8 @@ export default function Home() {
               <Label>Primary Statistics — {result.trials.toLocaleString()} trials</Label>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 1, background: "var(--border)" }}>
                 {[
-                  { label: "E[P]  mean", value: `${(result.mean * 100).toFixed(2)}%` },
-                  { label: "σ  std dev", value: `±${(result.std_dev * 100).toFixed(2)}%` },
+                  { label: "E[P] mean", value: `${(result.mean * 100).toFixed(2)}%` },
+                  { label: "σ std dev", value: `±${(result.std_dev * 100).toFixed(2)}%` },
                   {
                     label: "95% CI",
                     value: `[${(result.confidence_interval_low * 100).toFixed(1)}, ${(result.confidence_interval_high * 100).toFixed(1)}]`,
@@ -1214,13 +1160,9 @@ export default function Home() {
                   </div>
                 ))}
               </div>
-
-              {/* ── NEW: Distribution badge ───────────────────────────────── */}
               <div style={{ marginTop: 12 }}>
                 <DistributionBadge distributionType={result.distribution_type} />
               </div>
-
-              {/* ── NEW: Risk adjustment display ─────────────────────────── */}
               <RiskAdjustmentDisplay
                 base={baseProbability}
                 adjusted={result.risk_adjusted_mean ?? result.mean}
@@ -1228,7 +1170,7 @@ export default function Home() {
               />
             </section>
 
-            {/* ── Risk Interpretation ─────────────────────────────────────── */}
+            {/* Risk Interpretation */}
             {interpretation && (
               <section style={{ marginBottom: 28 }}>
                 <Label>Risk Classification</Label>
@@ -1238,7 +1180,6 @@ export default function Home() {
                     background: "var(--surface-1)",
                   }}
                 >
-                  {/* Header row */}
                   <div
                     style={{
                       padding: "10px 14px",
@@ -1250,7 +1191,6 @@ export default function Home() {
                     }}
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                      {/* Score bar */}
                       <div style={{ display: "flex", gap: 3 }}>
                         {[1, 2, 3, 4, 5].map((i) => (
                           <div
@@ -1294,13 +1234,10 @@ export default function Home() {
                       ))}
                     </div>
                   </div>
-
-                  {/* Body */}
                   <div style={{ padding: "14px" }}>
                     <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.65, margin: 0 }}>
                       {interpretation.headline}
                     </p>
-
                     {(interpretation.fragility_warning || interpretation.epistemic_note || interpretation.convergence_note) && (
                       <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
                         {interpretation.fragility_warning && (
@@ -1344,7 +1281,6 @@ export default function Home() {
                         )}
                       </div>
                     )}
-
                     <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
                       <p
                         className="font-mono"
@@ -1361,7 +1297,7 @@ export default function Home() {
               </section>
             )}
 
-            {/* ── Diagnostics table ────────────────────────────────────────── */}
+            {/* Diagnostics table */}
             <section style={{ marginBottom: 28 }}>
               <Label>Diagnostic Statistics</Label>
               <div style={{ background: "var(--surface-1)", border: "1px solid var(--border)" }}>
@@ -1435,12 +1371,11 @@ export default function Home() {
               </div>
             </section>
 
-            {/* ── Uncertainty decomposition ─────────────────────────────────── */}
+            {/* Uncertainty decomposition */}
             {result.aleatory_fraction != null && result.epistemic_fraction != null && (
               <section style={{ marginBottom: 28 }}>
                 <Label>Uncertainty Decomposition — Der Kiureghian &amp; Ditlevsen (2009)</Label>
                 <div className="card">
-                  {/* Decomposition bar */}
                   <div
                     style={{
                       display: "flex",
@@ -1450,7 +1385,6 @@ export default function Home() {
                       overflow: "hidden",
                     }}
                   >
-                    {/* Aleatory (grey) */}
                     <div
                       style={{
                         width: `${result.aleatory_fraction * 100}%`,
@@ -1458,7 +1392,6 @@ export default function Home() {
                         transition: "width 600ms",
                       }}
                     />
-                    {/* Epistemic (white) */}
                     <div
                       style={{
                         flex: 1,
@@ -1468,7 +1401,6 @@ export default function Home() {
                       }}
                     />
                   </div>
-
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
                     <span
                       style={{
@@ -1491,8 +1423,6 @@ export default function Home() {
                       EPISTEMIC {(result.epistemic_fraction * 100).toFixed(0)}% — reducible
                     </span>
                   </div>
-
-                  {/* Classification badge */}
                   <div
                     style={{
                       display: "inline-flex",
@@ -1514,7 +1444,6 @@ export default function Home() {
                       {result.uncertainty_type === "epistemic-dominant" ? "EPISTEMIC-DOMINANT" : "ALEATORY-DOMINANT"}
                     </span>
                   </div>
-
                   {result.uncertainty_type === "epistemic-dominant" && (
                     <p
                       style={{
@@ -1526,11 +1455,9 @@ export default function Home() {
                         lineHeight: 1.6,
                       }}
                     >
-                      ↳ The dominant uncertainty source is knowledge-based and reducible. Targeted evidence gathering — expert consultation,
-                      pilot testing, data collection — would meaningfully tighten this estimate.
+                      ↳ The dominant uncertainty source is knowledge-based and reducible. Targeted evidence gathering — expert consultation, pilot testing, data collection — would meaningfully tighten this estimate.
                     </p>
                   )}
-
                   {result.uncertainty_type !== "epistemic-dominant" && (
                     <p
                       style={{
@@ -1542,15 +1469,14 @@ export default function Home() {
                         lineHeight: 1.6,
                       }}
                     >
-                      ↳ The dominant uncertainty source is inherent randomness. Additional information is unlikely to substantially narrow
-                      this estimate&apos;s spread.
+                      ↳ The dominant uncertainty source is inherent randomness. Additional information is unlikely to substantially narrow this estimate&apos;s spread.
                     </p>
                   )}
                 </div>
               </section>
             )}
 
-            {/* ── Sensitivity ──────────────────────────────────────────────── */}
+            {/* Sensitivity */}
             {sensitivity && (
               <section style={{ marginBottom: 28 }}>
                 <Label>Sensitivity Analysis — Spearman Rank Correlation</Label>
@@ -1602,7 +1528,7 @@ export default function Home() {
               </section>
             )}
 
-            {/* ── Stress test ──────────────────────────────────────────────── */}
+            {/* Stress test */}
             {stressResult && (
               <section style={{ marginBottom: 28 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
@@ -1671,7 +1597,7 @@ export default function Home() {
               </section>
             )}
 
-            {/* ── Pin / Compare ────────────────────────────────────────────── */}
+            {/* Pin / Compare */}
             <section style={{ marginBottom: 28 }}>
               {!pinnedResult ? (
                 <button
@@ -1699,7 +1625,7 @@ export default function Home() {
               )}
             </section>
 
-            {/* ── Distribution Chart ────────────────────────────────────────── */}
+            {/* Distribution Chart */}
             <section style={{ marginBottom: 28 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 10 }}>
                 <Label>{pinnedResult ? "Scenario Comparison" : "Probability Distribution"}</Label>
@@ -1716,7 +1642,6 @@ export default function Home() {
                   </div>
                 )}
               </div>
-
               <div style={{ border: "1px solid var(--border)", padding: "16px 8px 8px 8px", background: "var(--surface-1)" }}>
                 <ResponsiveContainer width="100%" height={200}>
                   <AreaChart
@@ -1733,7 +1658,6 @@ export default function Home() {
                         <stop offset="100%" stopColor="#f0f0f0" stopOpacity={0.02} />
                       </linearGradient>
                     </defs>
-
                     <CartesianGrid stroke="var(--surface-3)" strokeDasharray="none" />
                     <XAxis
                       dataKey={pinnedResult ? "x" : "probability"}
@@ -1755,13 +1679,10 @@ export default function Home() {
                       labelFormatter={(v) => `p = ${v}%`}
                       formatter={(v) => [typeof v === "number" ? v.toFixed(3) : "0.000", "density"]}
                     />
-
-                    {/* Risk bands — colored, functional data */}
                     <ReferenceArea x1={0} x2={25} fill={RISK_COLORS.critical} fillOpacity={0.06} />
                     <ReferenceArea x1={25} x2={50} fill={RISK_COLORS.high} fillOpacity={0.06} />
                     <ReferenceArea x1={50} x2={75} fill={RISK_COLORS.moderate} fillOpacity={0.06} />
                     <ReferenceArea x1={75} x2={100} fill={RISK_COLORS.favorable} fillOpacity={0.06} />
-
                     <ReferenceLine
                       x={pinnedResult ? Math.round(pinnedResult.mean * 100) : Math.round(result.mean * 100)}
                       stroke="var(--border-hi)"
@@ -1781,7 +1702,6 @@ export default function Home() {
                         label={{ value: "B", fill: "var(--text-secondary)", fontSize: 10, fontFamily: "var(--font-mono)" }}
                       />
                     )}
-
                     <Area
                       type="monotone"
                       dataKey={pinnedResult ? "densityA" : "density"}
@@ -1804,8 +1724,6 @@ export default function Home() {
                     )}
                   </AreaChart>
                 </ResponsiveContainer>
-
-                {/* Risk zone key */}
                 <div
                   style={{
                     display: "flex",
@@ -1829,7 +1747,7 @@ export default function Home() {
               </div>
             </section>
 
-            {/* ── Portfolio button ────────────────────────────────────────── */}
+            {/* Portfolio button */}
             <section style={{ marginBottom: 28 }}>
               <button
                 className="btn-outline"
@@ -1856,10 +1774,10 @@ export default function Home() {
               </button>
             </section>
 
-            {/* ── NEW: Copula Panel ───────────────────────────────────────── */}
+            {/* Copula Panel */}
             <CopulaPanel apiUrl={API_URL} baseProbability={baseProbability} />
 
-            {/* ── Decision Summary ─────────────────────────────────────────── */}
+            {/* Decision Summary */}
             {decisionSummary && (
               <section style={{ marginBottom: 28 }}>
                 <Label>Decision Summary</Label>
@@ -1891,7 +1809,7 @@ export default function Home() {
 
         <HR />
 
-        {/* ── Scenario History ──────────────────────────────────────────────── */}
+        {/* Scenario History */}
         {history.length > 0 && (
           <section style={{ marginBottom: 32 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 10 }}>
@@ -1908,9 +1826,7 @@ export default function Home() {
                 </button>
               </div>
             </div>
-
             <div style={{ border: "1px solid var(--border)" }}>
-              {/* Table header */}
               <div
                 style={{
                   display: "grid",
@@ -1930,7 +1846,6 @@ export default function Home() {
                   </span>
                 ))}
               </div>
-              {/* Table rows */}
               {history.map((entry, i) => (
                 <div
                   key={entry.id}
@@ -1977,7 +1892,7 @@ export default function Home() {
           </section>
         )}
 
-        {/* ── Portfolio Analysis ────────────────────────────────────────────── */}
+        {/* Portfolio Analysis */}
         {portfolio.length >= 2 && (
           <section style={{ marginBottom: 32 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 10 }}>
@@ -2009,7 +1924,6 @@ export default function Home() {
                 </button>
               </div>
             </div>
-
             <div style={{ border: "1px solid var(--border)" }}>
               {portfolio.map((s, i) => (
                 <div
@@ -2042,7 +1956,6 @@ export default function Home() {
                   </span>
                 </div>
               ))}
-
               {portfolioResult && (
                 <div style={{ padding: "14px 12px", borderTop: "1px solid var(--border-mid)", background: "var(--surface-2)" }}>
                   <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 12 }}>{portfolioResult.recommendation_basis}</p>
@@ -2096,7 +2009,7 @@ export default function Home() {
           </section>
         )}
 
-        {/* ── Footer ───────────────────────────────────────────────────────── */}
+        {/* Footer */}
         <footer
           style={{
             borderTop: "1px solid var(--border)",
@@ -2109,7 +2022,7 @@ export default function Home() {
           {[
             { href: "/model-card", label: "Model Card" },
             { href: "/api-docs", label: "API Reference" },
-            { href: "/calibration", label: "Calibration" }, // NEW
+            { href: "/calibration", label: "Calibration" },
           ].map((link) => (
             <Link
               key={link.href}
