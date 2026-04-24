@@ -1,17 +1,15 @@
 "use client";
 import Link from "next/link";
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ReferenceLine, ReferenceArea, ResponsiveContainer,
 } from "recharts";
 import { buildLocalCurve } from "@/lib/betaPdf";
 import { saveToHistory, StoredScenario } from "@/lib/storage";
-
 // ══════════════════════════════════════════════════════════════════════════════
 // TYPES
 // ══════════════════════════════════════════════════════════════════════════════
-
 type ExtractionResult = {
   suggested_probability: number;
   suggested_confidence: number;
@@ -28,7 +26,6 @@ type ExtractionResult = {
   reasoning: string;
   extraction_mode: string;
 };
-
 type SimulationResult = {
   mean: number;
   variance: number;
@@ -50,7 +47,6 @@ type SimulationResult = {
   adjusted_probability?: number;
   risk?: number;
 };
-
 type SensitivityResult = {
   probability_sensitivity: number;
   confidence_sensitivity: number;
@@ -68,13 +64,11 @@ type SensitivityResult = {
   decision_robustness?: string;
   recommended_focus?: string;
 };
-
 type SummarizeResult = {
   summary: string;
   key_insight: string;
   decision_framing: string;
 };
-
 type Assumption = {
   id: string;
   label: string;
@@ -82,19 +76,16 @@ type Assumption = {
   weight: number;
   description: string;
 };
-
 type AssumptionsResult = {
   assumptions: Assumption[];
   synthesis_note: string;
 };
-
 type RiskProfile = {
   level: string;
   label: string;
   color: string;
   score: number;
 };
-
 type InterpretationResult = {
   risk_profile: RiskProfile;
   headline: string;
@@ -105,7 +96,6 @@ type InterpretationResult = {
   confidence_class: string;
   spread_class: string;
 };
-
 type StressPoint = {
   shift_pp: number;
   mean: number;
@@ -113,14 +103,12 @@ type StressPoint = {
   ci_high: number;
   risk_category: string;
 };
-
 type StressResult = {
   stress_points: StressPoint[];
   fragility_frontier_pp: number | null;
   robust_range_pp: number;
   is_fragile: boolean;
 };
-
 type PortfolioScenario = {
   label: string;
   description: string;
@@ -133,7 +121,6 @@ type PortfolioScenario = {
   eviu: number;
   uncertainty_type: string;
 };
-
 type PortfolioResult = {
   ranked_labels: string[];
   ranked_scores: number[];
@@ -148,7 +135,6 @@ type PortfolioResult = {
   highest_upside: string;
   lowest_downside: string;
 };
-
 type ThresholdPoint = {
   threshold: number;
   action: string;
@@ -156,7 +142,6 @@ type ThresholdPoint = {
   probability_above: number;
   eu_margin: number;
 };
-
 type DecisionResult = {
   recommended_action: string;
   decision_confidence: string;
@@ -174,13 +159,11 @@ type DecisionResult = {
   action_interpretation: string;
   threshold_sensitivity: ThresholdPoint[];
 };
-
 type RiskFactor = {
   name: string;
   probability: number;
   confidence: number;
 };
-
 type CopulaResult = {
   mean: number;
   std_dev: number;
@@ -198,7 +181,6 @@ type CopulaResult = {
   copula_type: string;
   interpretation?: string;
 };
-
 type ChartPoint = {
   x?: number;
   probability?: number;
@@ -206,28 +188,23 @@ type ChartPoint = {
   densityA?: number;
   densityB?: number;
 };
-
 // ══════════════════════════════════════════════════════════════════════════════
 // CONSTANTS
 // ══════════════════════════════════════════════════════════════════════════════
-
 const RISK_COLORS: Record<string, string> = {
-  critical:  "#f87171",
-  high:      "#fb923c",
-  moderate:  "#fbbf24",
+  critical: "#f87171",
+  high: "#fb923c",
+  moderate: "#fbbf24",
   favorable: "#34d399",
-  strong:    "#10b981",
+  strong: "#10b981",
 };
-
 const DOMAIN_LABELS: Record<string, string> = {
   academic: "Academic", career: "Career", business: "Business",
   finance: "Finance", health: "Health", exam: "Exam", other: "General",
 };
-
 // ══════════════════════════════════════════════════════════════════════════════
 // UTILITIES
 // ══════════════════════════════════════════════════════════════════════════════
-
 function interpolateDensity(xPct: number, histX: number[], histY: number[]): number {
   const xProb = xPct / 100;
   const margin = ((histX[histX.length - 1] - histX[0]) / histX.length) * 2;
@@ -240,7 +217,6 @@ function interpolateDensity(xPct: number, histX: number[], histY: number[]): num
   }
   return 0;
 }
-
 function buildComparisonData(a: SimulationResult, b: SimulationResult | null) {
   return Array.from({ length: 101 }, (_, x) => ({
     x,
@@ -248,7 +224,6 @@ function buildComparisonData(a: SimulationResult, b: SimulationResult | null) {
     densityB: b ? interpolateDensity(x, b.histogram_x, b.histogram_y) : undefined,
   }));
 }
-
 function recomputeFromAssumptions(list: Assumption[], w: Record<string, number>): number {
   let p = 0.5;
   list.forEach((a) => {
@@ -257,20 +232,17 @@ function recomputeFromAssumptions(list: Assumption[], w: Record<string, number>)
   });
   return Math.max(0.05, Math.min(0.95, Math.round(p * 100) / 100));
 }
-
 function getRiskLabel(mean: number) {
   const pct = mean * 100;
-  if (pct < 20) return { level: "critical",  label: "Critical",  color: "#f87171" };
-  if (pct < 35) return { level: "high",      label: "High Risk", color: "#fb923c" };
-  if (pct < 55) return { level: "moderate",  label: "Moderate",  color: "#fbbf24" };
+  if (pct < 20) return { level: "critical", label: "Critical", color: "#f87171" };
+  if (pct < 35) return { level: "high", label: "High Risk", color: "#fb923c" };
+  if (pct < 55) return { level: "moderate", label: "Moderate", color: "#fbbf24" };
   if (pct < 72) return { level: "favorable", label: "Favorable", color: "#34d399" };
-  return              { level: "strong",    label: "Strong",    color: "#10b981" };
+  return { level: "strong", label: "Strong", color: "#10b981" };
 }
-
 // ══════════════════════════════════════════════════════════════════════════════
 // SMALL COMPONENTS
 // ══════════════════════════════════════════════════════════════════════════════
-
 function SectionLabel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
     <p className={`section-label ${className}`} style={{ marginBottom: 10 }}>
@@ -278,7 +250,6 @@ function SectionLabel({ children, className = "" }: { children: React.ReactNode;
     </p>
   );
 }
-
 function Divider({ label }: { label?: string }) {
   if (label) {
     return (
@@ -289,11 +260,9 @@ function Divider({ label }: { label?: string }) {
   }
   return <div className="rule" style={{ margin: "24px 0" }} />;
 }
-
 function Badge({ children, variant = "ghost" }: { children: React.ReactNode; variant?: "blue" | "green" | "amber" | "red" | "ghost" }) {
   return <span className={`badge badge-${variant}`}>{children}</span>;
 }
-
 // Extraction mode indicator
 function ExtractionBadge({ mode }: { mode: string }) {
   const isAI = mode.startsWith("ai");
@@ -303,9 +272,8 @@ function ExtractionBadge({ mode }: { mode: string }) {
     </Badge>
   );
 }
-
 // Risk classification pill
-function RiskPill({ level, label, color }: { level: string; label: string; color: string }) {
+function RiskPill({ label, color }: { label: string; color: string }) {
   return (
     <span
       className="risk-pill"
@@ -320,7 +288,6 @@ function RiskPill({ level, label, color }: { level: string; label: string; color
     </span>
   );
 }
-
 // Convergence dot
 function ConvergenceDot({ rhat }: { rhat: number }) {
   const ok = rhat < 1.05;
@@ -338,7 +305,6 @@ function ConvergenceDot({ rhat }: { rhat: number }) {
     </span>
   );
 }
-
 // Metric card — used in stats grid
 function MetricCard({
   label, value, note, accent = false, color,
@@ -362,7 +328,6 @@ function MetricCard({
     </div>
   );
 }
-
 // Slider with visual fill and value
 function SliderField({
   label, subLabel, value, min, max, step, onChange, format,
@@ -420,11 +385,9 @@ function SliderField({
     </div>
   );
 }
-
 // ══════════════════════════════════════════════════════════════════════════════
 // COPULA PANEL
 // ══════════════════════════════════════════════════════════════════════════════
-
 function CopulaPanel({
   apiUrl, baseProbability, initialFactors,
 }: {
@@ -451,17 +414,6 @@ function CopulaPanel({
   const [result, setResult] = useState<CopulaResult | null>(null);
   const [running, setRunning] = useState(false);
 
-  // Update factors when extraction completes
-  useEffect(() => {
-    if (initialFactors && initialFactors.length > 0) {
-      setFactors(initialFactors.slice(0, 3).map(f => ({
-        name: f.name,
-        probability: f.probability,
-        confidence: f.confidence ?? 0.60,
-      })));
-    }
-  }, [initialFactors]);
-
   async function runCopula() {
     setRunning(true);
     try {
@@ -486,14 +438,12 @@ function CopulaPanel({
     } catch {}
     setRunning(false);
   }
-
   return (
     <div style={{ marginBottom: 20 }}>
       <button className="collapsible-trigger" onClick={() => setOpen(!open)}>
         <span>Correlated Risk Analysis — {copulaType === "student_t" ? "Student-t" : "Gaussian"} Copula</span>
         <span style={{ fontSize: 12, opacity: 0.5 }}>{open ? "▴" : "▾"}</span>
       </button>
-
       {open && (
         <div
           className="animate-fade-in"
@@ -507,7 +457,6 @@ function CopulaPanel({
           <p style={{ fontFamily: "var(--font-display)", fontSize: 13, fontStyle: "italic", color: "var(--text-muted)", marginBottom: 16, lineHeight: 1.7 }}>
             Models correlated risks via copula simulation. Risk events cluster — market crashes make all risks more likely simultaneously.
           </p>
-
           {/* Copula type selector */}
           <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
             {(["gaussian", "student_t"] as const).map(ct => (
@@ -531,7 +480,6 @@ function CopulaPanel({
               </button>
             ))}
           </div>
-
           {/* Risk factors */}
           {factors.map((f, i) => (
             <div key={i} style={{ marginBottom: 10, padding: "12px 14px", background: "var(--surface-2)", borderLeft: "2px solid var(--border-mid)" }}>
@@ -575,7 +523,6 @@ function CopulaPanel({
               />
             </div>
           ))}
-
           {factors.length < 4 && (
             <button
               onClick={() => setFactors([...factors, { name: `Risk factor ${factors.length + 1}`, probability: 0.20, confidence: 0.65 }])}
@@ -589,7 +536,6 @@ function CopulaPanel({
               + Add risk factor
             </button>
           )}
-
           <SliderField
             label="Inter-risk correlation"
             subLabel="ρ"
@@ -599,7 +545,6 @@ function CopulaPanel({
             format={(v) => v.toFixed(2)}
             note="Positive correlation means risks co-occur more than expected under independence."
           />
-
           <button
             onClick={runCopula}
             disabled={running || factors.length < 2}
@@ -608,7 +553,6 @@ function CopulaPanel({
           >
             {running ? "Running copula simulation…" : `Run ${copulaType === "student_t" ? "Student-t" : "Gaussian"} Copula`}
           </button>
-
           {result && (
             <div style={{ marginTop: 16 }} className="animate-slide-up">
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1, background: "var(--border-subtle)", marginBottom: 10 }}>
@@ -636,11 +580,9 @@ function CopulaPanel({
     </div>
   );
 }
-
 // ══════════════════════════════════════════════════════════════════════════════
 // DECISION PANEL
 // ══════════════════════════════════════════════════════════════════════════════
-
 function DecisionPanel({
   result, threshold, setThreshold, onRerun,
 }: {
@@ -650,13 +592,11 @@ function DecisionPanel({
   onRerun: () => void;
 }) {
   const ACTION_CONFIG = {
-    proceed:          { label: "Proceed",          color: "var(--action-proceed)", bg: "rgba(16,185,129,0.06)" },
-    abandon:          { label: "Abandon",           color: "var(--action-abandon)", bg: "rgba(248,113,113,0.06)" },
-    gather_more_info: { label: "Gather Info First", color: "var(--action-gather)",  bg: "rgba(251,191,36,0.06)" },
+    proceed: { label: "Proceed", color: "var(--action-proceed)", bg: "rgba(16,185,129,0.06)" },
+    abandon: { label: "Abandon", color: "var(--action-abandon)", bg: "rgba(248,113,113,0.06)" },
+    gather_more_info: { label: "Gather Info First", color: "var(--action-gather)", bg: "rgba(251,191,36,0.06)" },
   } as Record<string, { label: string; color: string; bg: string }>;
-
   const cfg = ACTION_CONFIG[result.recommended_action] ?? ACTION_CONFIG["gather_more_info"];
-
   return (
     <div className="animate-slide-up" style={{ marginBottom: 28 }}>
       <SectionLabel>Decision Analysis — Expected Utility & Regret</SectionLabel>
@@ -675,7 +615,6 @@ function DecisionPanel({
           background: `radial-gradient(ellipse at 100% 0%, ${cfg.color}0a 0%, transparent 70%)`,
           pointerEvents: "none",
         }} />
-
         {/* Header */}
         <div
           className="decision-header"
@@ -700,12 +639,10 @@ function DecisionPanel({
             τ = {(result.threshold_used * 100).toFixed(0)}%
           </span>
         </div>
-
         <div style={{ padding: "18px" }}>
           <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.7, marginBottom: 18 }}>
             {result.action_interpretation}
           </p>
-
           {/* Metrics */}
           <div style={{
             display: "grid",
@@ -717,13 +654,12 @@ function DecisionPanel({
             {[
               { label: "EU(proceed)", value: result.expected_utility_proceed.toFixed(3), note: "vs 0 baseline" },
               { label: "P(above τ)", value: `${(result.probability_above_threshold * 100).toFixed(1)}%`, note: `at ${(result.threshold_used * 100).toFixed(0)}%` },
-              { label: "Regret",     value: result.expected_regret.toFixed(3),              note: "expected loss" },
-              { label: "VPI",        value: result.vpi.toFixed(3),                          note: "info value" },
+              { label: "Regret", value: result.expected_regret.toFixed(3), note: "expected loss" },
+              { label: "VPI", value: result.vpi.toFixed(3), note: "info value" },
             ].map((m) => (
               <MetricCard key={m.label} label={m.label} value={m.value} note={m.note} />
             ))}
           </div>
-
           {/* Regret */}
           <div style={{ borderLeft: `2px solid var(--border-mid)`, paddingLeft: 14, marginBottom: 14 }}>
             <p style={{ fontFamily: "var(--font-data)", fontSize: 9, color: "var(--text-muted)", letterSpacing: "0.14em", marginBottom: 5, textTransform: "uppercase" }}>
@@ -733,7 +669,6 @@ function DecisionPanel({
               {result.regret_interpretation}
             </p>
           </div>
-
           {/* VPI */}
           <div style={{
             borderLeft: `2px solid ${result.vpi > 0.08 ? "var(--amber)" : "var(--border-mid)"}`,
@@ -751,7 +686,6 @@ function DecisionPanel({
               {result.vpi_interpretation}
             </p>
           </div>
-
           {/* Break-even */}
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20, padding: "10px 14px", background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}>
             <span style={{ fontFamily: "var(--font-data)", fontSize: 10, color: "var(--text-muted)", letterSpacing: "0.08em" }}>
@@ -764,7 +698,6 @@ function DecisionPanel({
               — EU(proceed) = EU(abandon) at this threshold
             </span>
           </div>
-
           {/* Threshold slider */}
           <div style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: 16 }}>
             <SliderField
@@ -778,7 +711,6 @@ function DecisionPanel({
             <button className="btn-outline" style={{ width: "100%", marginTop: 12, marginBottom: 16 }} onClick={onRerun}>
               ↺ Recompute at τ = {(threshold * 100).toFixed(0)}%
             </button>
-
             {/* Threshold sensitivity grid */}
             <p style={{ fontFamily: "var(--font-data)", fontSize: 9, color: "var(--text-muted)", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 8 }}>
               Threshold Sensitivity
@@ -821,11 +753,9 @@ function DecisionPanel({
     </div>
   );
 }
-
 // ══════════════════════════════════════════════════════════════════════════════
 // WELCOME / EMPTY STATE
 // ══════════════════════════════════════════════════════════════════════════════
-
 function WelcomeState() {
   const scenarios = [
     "I'm applying to PhD programs in machine learning at ETH Zurich with a 3.8 CGPA and two Q1 publications",
@@ -880,21 +810,17 @@ function WelcomeState() {
     </div>
   );
 }
-
 // ══════════════════════════════════════════════════════════════════════════════
 // MAIN PAGE
 // ══════════════════════════════════════════════════════════════════════════════
-
 export default function Home() {
   const SESSION_KEY = "probabilis_session_v1";
   const HISTORY_KEY = "probabilis_history_v1";
-
   const API_URL = useMemo(() => {
     const url = process.env.NEXT_PUBLIC_API_URL;
     if (!url) return "https://web-production-810f7.up.railway.app";
     return url.endsWith("/") ? url.slice(0, -1) : url;
   }, []);
-
   // ── State ────────────────────────────────────────────────────────────────
   const [description, setDescription] = useState("");
   const [baseProbability, setBaseProbability] = useState(0.5);
@@ -926,7 +852,6 @@ export default function Home() {
   const [decisionThreshold, setDecisionThreshold] = useState(0.5);
   const abortRef = useRef<AbortController | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
-
   // ── Init ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     try {
@@ -943,14 +868,12 @@ export default function Home() {
     fetch(`${API_URL}/health`).catch(() => {});
     return () => { abortRef.current?.abort(); };
   }, [API_URL]);
-
   useEffect(() => {
     if (!description && !result) return;
     try {
       localStorage.setItem(SESSION_KEY, JSON.stringify({ description, baseProbability, confidence, reasoning, extractionMode }));
     } catch {}
   }, [description, baseProbability, confidence, reasoning, extractionMode, result]);
-
   // ── Analyze ───────────────────────────────────────────────────────────────
   async function analyzeScenario() {
     if (!description.trim()) return;
@@ -1008,8 +931,7 @@ export default function Home() {
       setExtracting(false);
     }
   }
-
-  // ── Simulate ──────────────────────────────────────────────────────────────
+  // ── Simulate (fixed) ──────────────────────────────────────────────────────
   async function runSimulation() {
     abortRef.current?.abort();
     setSimulating(true);
@@ -1021,81 +943,108 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          description, base_probability: baseProbability,
-          confidence, risk, trials: 10000, beta_scale: 50,
+          description,
+          base_probability: baseProbability,
+          confidence,
+          risk,
+          trials: 10000,
+          beta_scale: 50,
         }),
       });
       if (!res.ok) throw new Error(`${res.status}`);
-      const data: SimulationResult = await res.json();
+      const data = await res.json(); // SimulationResult
       setResult(data);
-      setSimulatingStep("Saving to history…");
-      const entry: StoredScenario = {
-        id: Date.now() * 1000 + Math.floor(Math.random() * 1000),
+      // ── Save a quick base entry immediately so history shows up ──────────
+      const entryId = Date.now() * 1000 + Math.floor(Math.random() * 1000);
+      const baseEntry = {
+        id: entryId,
         description: description.slice(0, 120) + (description.length > 120 ? "…" : ""),
-        baseProbability, confidence,
+        baseProbability,
+        confidence,
         result: {
-          mean: data.mean, std_dev: data.std_dev,
+          mean: data.mean,
+          std_dev: data.std_dev,
           confidence_interval_low: data.confidence_interval_low,
           confidence_interval_high: data.confidence_interval_high,
-          trials: data.trials, rhat: data.rhat ?? 1,
+          trials: data.trials,
+          rhat: data.rhat ?? 1,
           eviu: data.eviu ?? 0,
           uncertainty_type: data.uncertainty_type ?? "aleatory-dominant",
           variance_reduction_pct: data.variance_reduction_pct ?? 0,
           aleatory_fraction: data.aleatory_fraction,
           epistemic_fraction: data.epistemic_fraction,
           distribution_type: data.distribution_type,
+          risk: data.risk ?? undefined,
+          adjusted_probability: data.adjusted_probability ?? undefined,
         },
-        extractionMode, timestamp: new Date().toLocaleTimeString(),
+        extractionMode,
+        timestamp: new Date().toLocaleTimeString(),
         isoDate: new Date().toISOString(),
       };
-      saveToHistory(entry);
-      setHistory(prev => [entry, ...prev].slice(0, 20));
-
-      // Scroll to results
+      saveToHistory(baseEntry);
+      setHistory(prev => [baseEntry, ...prev.filter(e => e.id !== entryId)].slice(0, 20));
       setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 200);
-
-      // Sequential enrichment
+      // ── Enrichment — collect results for later persistence ───────────────
+      let sensitivityData = null;
+      let stressData = null;
+      let interpretationData = null;
+      let decisionData = null;
       setSimulatingStep("Computing sensitivity attribution…");
       try {
         const sr = await fetch(`${API_URL}/sensitivity`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ base_probability: baseProbability, confidence, trials: 3000 }),
         });
-        if (sr.ok) setSensitivity(await sr.json());
+        if (sr.ok) {
+          sensitivityData = await sr.json();
+          setSensitivity(sensitivityData);
+        }
       } catch {}
-
       setSimulatingStep("Running stress test…");
       try {
         const str = await fetch(`${API_URL}/stress`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ base_probability: baseProbability, confidence }),
         });
-        if (str.ok) setStressResult(await str.json());
+        if (str.ok) {
+          stressData = await str.json();
+          setStressResult(stressData);
+        }
       } catch {}
-
       setSimulatingStep("Generating risk interpretation…");
       try {
         const ir = await fetch(`${API_URL}/interpret`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            description, mean: data.mean, std_dev: data.std_dev,
+            description,
+            mean: data.mean,
+            std_dev: data.std_dev,
             confidence_interval_low: data.confidence_interval_low,
             confidence_interval_high: data.confidence_interval_high,
-            rhat: data.rhat ?? 1, eviu: data.eviu ?? 0,
+            rhat: data.rhat ?? 1,
+            eviu: data.eviu ?? 0,
             uncertainty_type: data.uncertainty_type ?? "aleatory-dominant",
             aleatory_fraction: data.aleatory_fraction ?? 0.6,
             epistemic_fraction: data.epistemic_fraction ?? 0.4,
           }),
         });
-        if (ir.ok) setInterpretation(await ir.json());
+        if (ir.ok) {
+          interpretationData = await ir.json();
+          setInterpretation(interpretationData);
+        }
       } catch {}
-
       setSimulatingStep("Generating decision summary…");
       try {
         const sumr = await fetch(`${API_URL}/summarize`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            description, mean: data.mean, std_dev: data.std_dev,
+            description,
+            mean: data.mean,
+            std_dev: data.std_dev,
             confidence_interval_low: data.confidence_interval_low,
             confidence_interval_high: data.confidence_interval_high,
             trials: data.trials,
@@ -1103,22 +1052,63 @@ export default function Home() {
         });
         if (sumr.ok) setDecisionSummary(await sumr.json());
       } catch {}
-
       setSimulatingStep("Computing decision analysis…");
       try {
         const dr = await fetch(`${API_URL}/decision`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            base_probability: baseProbability, confidence,
-            mean: data.mean, std_dev: data.std_dev,
+            base_probability: baseProbability,
+            confidence,
+            mean: data.mean,
+            std_dev: data.std_dev,
             confidence_interval_low: data.confidence_interval_low,
             confidence_interval_high: data.confidence_interval_high,
-            threshold: decisionThreshold, trials: 10000,
+            threshold: decisionThreshold,
+            trials: 10000,
           }),
         });
-        if (dr.ok) setDecisionResult(await dr.json());
+        if (dr.ok) {
+          decisionData = await dr.json();
+          setDecisionResult(decisionData);
+        }
       } catch {}
-
+      // ── BUG 4 FIX: Re-save entry with all enrichment data ────────────────
+      const enrichedEntry = {
+        ...baseEntry,
+        result: {
+          ...baseEntry.result,
+          // Decision
+          decision_action: decisionData?.recommended_action,
+          decision_eu_proceed: decisionData?.expected_utility_proceed,
+          decision_eu_abandon: decisionData?.expected_utility_abandon,
+          decision_regret: decisionData?.expected_regret,
+          decision_vpi: decisionData?.vpi,
+          decision_break_even: decisionData?.break_even_probability,
+          // Sensitivity
+          sensitivity_dominant: sensitivityData?.dominant_factor,
+          sensitivity_prob_impact: sensitivityData?.probability_impact,
+          sensitivity_conf_impact: sensitivityData?.confidence_impact,
+          sensitivity_prob_rho: sensitivityData?.probability_sensitivity,
+          sensitivity_conf_rho: sensitivityData?.confidence_sensitivity,
+          sensitivity_prob_variance_pct: sensitivityData?.attribution?.[0]?.variance_explained_pct,
+          sensitivity_conf_variance_pct: sensitivityData?.attribution?.[1]?.variance_explained_pct,
+          sensitivity_robustness: sensitivityData?.decision_robustness,
+          // Stress
+          stress_fragile: stressData?.is_fragile,
+          stress_frontier_pp: stressData?.fragility_frontier_pp ?? undefined,
+          stress_robust_range_pp: stressData?.robust_range_pp,
+          // Risk interpretation
+          risk_level: interpretationData?.risk_profile?.level,
+          risk_label: interpretationData?.risk_profile?.label,
+          risk_headline: interpretationData?.headline,
+          risk_action: interpretationData?.action_framing,
+        },
+      };
+      saveToHistory(enrichedEntry);
+      setHistory(prev =>
+        [enrichedEntry, ...prev.filter(e => e.id !== entryId)].slice(0, 20)
+      );
     } catch {
       setError("Simulation failed. Verify your backend is running.");
     } finally {
@@ -1126,7 +1116,6 @@ export default function Home() {
       setSimulatingStep("");
     }
   }
-
   // ── Export ────────────────────────────────────────────────────────────────
   function exportJSON(hist: StoredScenario[]) {
     const blob = new Blob([JSON.stringify({
@@ -1145,7 +1134,6 @@ export default function Home() {
     a.download = `probabilis-${new Date().toISOString().split("T")[0]}.json`;
     a.click();
   }
-
   async function exportLatex(hist: StoredScenario[]) {
     if (!hist.length) return;
     try {
@@ -1157,13 +1145,14 @@ export default function Home() {
           author: "Rakibul Islam",
           institution: "Department of Statistics, SUST",
           scenarios: hist.slice(0, 10).map(e => ({
+            // ── Core ──────────────────────────────────────────────────────────
             description: e.description,
             base_probability: e.baseProbability,
             confidence: e.confidence,
             mean: e.result.mean,
             std_dev: e.result.std_dev,
             confidence_interval_low: e.result.confidence_interval_low,
-            confidence_interval_high: e.result.confidence_interval_high,
+            confidence_interval_high:e.result.confidence_interval_high,
             rhat: e.result.rhat ?? 1.0,
             eviu: e.result.eviu ?? 0,
             variance_reduction_pct: e.result.variance_reduction_pct ?? 0,
@@ -1172,31 +1161,67 @@ export default function Home() {
             epistemic_fraction: e.result.epistemic_fraction ?? 0.4,
             extraction_mode: e.extractionMode,
             timestamp: e.timestamp,
+            // ── Optional enrichment ───────────────────────────────────────────
             risk: e.result.risk ?? null,
             adjusted_probability: e.result.adjusted_probability ?? null,
             distribution_type: e.result.distribution_type ?? null,
+            domain: e.result.domain ?? null,
+            // Decision
+            decision_action: e.result.decision_action ?? null,
+            decision_eu_proceed: e.result.decision_eu_proceed ?? null,
+            decision_eu_abandon: e.result.decision_eu_abandon ?? null,
+            decision_regret: e.result.decision_regret ?? null,
+            decision_vpi: e.result.decision_vpi ?? null,
+            decision_break_even: e.result.decision_break_even ?? null,
+            // Sensitivity
+            sensitivity_dominant: e.result.sensitivity_dominant ?? null,
+            sensitivity_prob_impact: e.result.sensitivity_prob_impact ?? null,
+            sensitivity_conf_impact: e.result.sensitivity_conf_impact ?? null,
+            sensitivity_prob_rho: e.result.sensitivity_prob_rho ?? null,
+            sensitivity_conf_rho: e.result.sensitivity_conf_rho ?? null,
+            sensitivity_prob_variance_pct: e.result.sensitivity_prob_variance_pct ?? null,
+            sensitivity_conf_variance_pct: e.result.sensitivity_conf_variance_pct ?? null,
+            sensitivity_robustness: e.result.sensitivity_robustness ?? null,
+            // Stress
+            stress_fragile: e.result.stress_fragile ?? null,
+            stress_frontier_pp: e.result.stress_frontier_pp ?? null,
+            stress_robust_range_pp: e.result.stress_robust_range_pp ?? null,
+            // Risk interpretation
+            risk_level: e.result.risk_level ?? null,
+            risk_label: e.result.risk_label ?? null,
+            risk_headline: e.result.risk_headline ?? null,
+            risk_action: e.result.risk_action ?? null,
+            // Copula (populated if user ran copula panel — not auto-stored yet)
+            copula_mean: e.result.copula_mean ?? null,
+            copula_std: e.result.copula_std ?? null,
+            copula_tail_5: e.result.copula_tail_5 ?? null,
+            copula_joint_failure: e.result.copula_joint_failure ?? null,
+            copula_correlation_effect: e.result.copula_correlation_effect ?? null,
+            copula_tail_dependence: e.result.copula_tail_dependence ?? null,
+            copula_type: e.result.copula_type ?? null,
+            copula_df: e.result.copula_df ?? null,
+            copula_risk_factor_names: e.result.copula_risk_factor_names ?? null,
           })),
         }),
       });
       if (res.ok) {
         const data = await res.json();
         const a = document.createElement("a");
-        a.href = URL.createObjectURL(new Blob([data.latex_source], { type: "text/plain" }));
+        a.href = URL.createObjectURL(
+          new Blob([data.latex_source], { type: "text/plain" })
+        );
         a.download = `probabilis-report-${new Date().toISOString().split("T")[0]}.tex`;
         a.click();
       }
     } catch {}
   }
-
   // ── Chart data ────────────────────────────────────────────────────────────
   const liveChartData = buildLocalCurve(baseProbability, confidence);
   const riskInfo = result ? getRiskLabel(result.mean) : null;
-
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <main style={{ minHeight: "100vh" }}>
       <div style={{ maxWidth: "var(--max-w)", margin: "0 auto", padding: `0 var(--gutter) 80px` }}>
-
         {/* ═══ HEADER ═══ */}
         <header style={{ padding: "36px 0 32px", borderBottom: "1px solid var(--border-subtle)", marginBottom: 40 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
@@ -1226,7 +1251,6 @@ export default function Home() {
             </nav>
           </div>
         </header>
-
         {/* ═══ SCENARIO INPUT ═══ */}
         <section style={{ marginBottom: 28 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
@@ -1250,7 +1274,6 @@ export default function Home() {
             Ctrl+Enter to analyze · More detail = higher accuracy
           </p>
         </section>
-
         {/* ═══ ANALYZE BUTTON ═══ */}
         <div style={{ display: "flex", gap: 12, marginBottom: 36, alignItems: "center" }}>
           <button
@@ -1273,7 +1296,6 @@ export default function Home() {
             </Badge>
           )}
         </div>
-
         {/* ═══ ERROR ═══ */}
         {error && (
           <div
@@ -1294,7 +1316,6 @@ export default function Home() {
             </p>
           </div>
         )}
-
         {/* ═══ EXTRACTION OUTPUT ═══ */}
         {reasoning && reasoningFresh && (
           <div className="reasoning-block animate-slide-up" style={{ marginBottom: 24 }}>
@@ -1316,7 +1337,6 @@ export default function Home() {
             )}
           </div>
         )}
-
         {/* ═══ ASSUMPTIONS AUDIT ═══ */}
         {assumptions && (
           <div style={{ marginBottom: 24 }}>
@@ -1332,7 +1352,7 @@ export default function Home() {
                 <p style={{ fontFamily: "var(--font-display)", fontSize: 13, fontStyle: "italic", color: "var(--text-muted)", marginBottom: 18, lineHeight: 1.65 }}>
                   {assumptions.synthesis_note}
                 </p>
-                {assumptions.assumptions.map((a, idx) => (
+                {assumptions.assumptions.map((a) => (
                   <div key={a.id} className="assumption-row">
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1383,10 +1403,9 @@ export default function Home() {
             )}
           </div>
         )}
-
         {/* ═══ PARAMETER CONTROLS ═══ */}
         <section style={{ marginBottom: 32 }}>
-          <SectionLabel style={{ marginBottom: 14 }}>Simulation Parameters</SectionLabel>
+          <SectionLabel>Simulation Parameters</SectionLabel>
           <div className="card" style={{ display: "flex", flexDirection: "column", gap: 24 }}>
             <SliderField
               label="Base Probability"
@@ -1403,7 +1422,7 @@ export default function Home() {
               min={0.10} max={1} step={0.01}
               onChange={setConfidence}
               format={(v) => `${(v * 100).toFixed(0)}%`}
-              note={`α = ${(baseProbability * confidence * 20).toFixed(2)},  β = ${((1 - baseProbability) * confidence * 20).toFixed(2)}  — Beta distribution parameters`}
+              note={`α = ${(baseProbability * confidence * 20).toFixed(2)}, β = ${((1 - baseProbability) * confidence * 20).toFixed(2)} — Beta distribution parameters`}
             />
             <div>
               <SliderField
@@ -1421,7 +1440,6 @@ export default function Home() {
             </div>
           </div>
         </section>
-
         {/* ═══ LIVE PREVIEW ═══ */}
         {!result && (
           <section style={{ marginBottom: 32 }}>
@@ -1451,7 +1469,6 @@ export default function Home() {
             </div>
           </section>
         )}
-
         {/* ═══ RUN BUTTON ═══ */}
         <div style={{ marginBottom: 48 }}>
           <button
@@ -1481,21 +1498,18 @@ export default function Home() {
             </div>
           )}
         </div>
-
         {/* ════════════════════════════════════════════════════════════════════
              RESULTS
-             ════════════════════════════════════════════════════════════════ */}
+             ════════════════════════════════════════════════ */}
         {result && (
           <div ref={resultsRef} className="results-section">
             <Divider label="Simulation Results" />
-
             {/* ── PRIMARY STATS ── */}
             <section style={{ marginBottom: 28 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
                 <SectionLabel>Primary Statistics — {result.trials.toLocaleString()} trials</SectionLabel>
-                {riskInfo && <RiskPill level={riskInfo.level} label={riskInfo.label} color={riskInfo.color} />}
+                {riskInfo && <RiskPill label={riskInfo.label} color={riskInfo.color} />}
               </div>
-
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 1, background: "var(--border-subtle)" }}>
                 <MetricCard
                   label="E[P] mean"
@@ -1512,7 +1526,6 @@ export default function Home() {
                   note={`spread: ${((result.confidence_interval_high - result.confidence_interval_low) * 100).toFixed(1)}pp`}
                 />
               </div>
-
               {/* Risk adjustment */}
               {(result.risk ?? 0) > 0.01 && result.adjusted_probability && (
                 <div className="animate-fade-in" style={{
@@ -1540,7 +1553,6 @@ export default function Home() {
                   </span>
                 </div>
               )}
-
               {/* Distribution type tag */}
               {result.distribution_type && (
                 <div style={{ marginTop: 10 }}>
@@ -1550,7 +1562,6 @@ export default function Home() {
                 </div>
               )}
             </section>
-
             {/* ── RISK INTERPRETATION ── */}
             {interpretation && (
               <section style={{ marginBottom: 28 }} className="animate-slide-up delay-100">
@@ -1596,12 +1607,10 @@ export default function Home() {
                       <Badge variant="ghost">{interpretation.spread_class}</Badge>
                     </div>
                   </div>
-
                   <div style={{ padding: "16px" }}>
                     <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.7, marginBottom: 14 }}>
                       {interpretation.headline}
                     </p>
-
                     {/* Warnings */}
                     {(interpretation.fragility_warning || interpretation.epistemic_note || interpretation.convergence_note) && (
                       <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
@@ -1627,7 +1636,6 @@ export default function Home() {
                         )}
                       </div>
                     )}
-
                     <div style={{ paddingTop: 12, borderTop: "1px solid var(--border-subtle)" }}>
                       <p style={{ fontFamily: "var(--font-data)", fontSize: 9, color: "var(--text-muted)", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 5 }}>
                         Recommended Action
@@ -1640,7 +1648,6 @@ export default function Home() {
                 </div>
               </section>
             )}
-
             {/* ── DIAGNOSTICS ── */}
             <section style={{ marginBottom: 28 }} className="animate-slide-up delay-200">
               <SectionLabel>Diagnostic Statistics</SectionLabel>
@@ -1670,7 +1677,7 @@ export default function Home() {
                     note: result.epistemic_fraction != null ? `${(result.epistemic_fraction * 100).toFixed(0)}% reducible` : "—",
                     tip: "Epistemic uncertainty is reducible via information gathering. Aleatory is irreducible inherent randomness.",
                   },
-                ].map((row, i, arr) => (
+                ].map((row) => (
                   <div key={row.key} className="tooltip-wrap diag-row" style={{ padding: "10px 16px" }}>
                     <span style={{ fontFamily: "var(--font-display)", fontSize: 13, fontStyle: "italic", color: "var(--text-secondary)" }}>
                       {row.key}
@@ -1692,7 +1699,6 @@ export default function Home() {
                 ))}
               </div>
             </section>
-
             {/* ── UNCERTAINTY DECOMPOSITION ── */}
             {result.aleatory_fraction != null && result.epistemic_fraction != null && (
               <section style={{ marginBottom: 28 }} className="animate-slide-up delay-300">
@@ -1729,7 +1735,6 @@ export default function Home() {
                 </div>
               </section>
             )}
-
             {/* ── SENSITIVITY ── */}
             {sensitivity && (
               <section style={{ marginBottom: 28 }} className="animate-slide-up delay-300">
@@ -1793,7 +1798,6 @@ export default function Home() {
                 </div>
               </section>
             )}
-
             {/* ── DECISION ANALYSIS ── */}
             {decisionResult && (
               <DecisionPanel
@@ -1819,7 +1823,6 @@ export default function Home() {
                 }}
               />
             )}
-
             {/* ── STRESS TEST ── */}
             {stressResult && (
               <section style={{ marginBottom: 28 }} className="animate-slide-up delay-400">
@@ -1867,7 +1870,6 @@ export default function Home() {
                 </p>
               </section>
             )}
-
             {/* ── PIN / COMPARE ── */}
             <section style={{ marginBottom: 28 }}>
               {!pinnedResult ? (
@@ -1888,7 +1890,6 @@ export default function Home() {
                 </div>
               )}
             </section>
-
             {/* ── DISTRIBUTION CHART ── */}
             <section style={{ marginBottom: 28 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 10 }}>
@@ -1944,9 +1945,9 @@ export default function Home() {
                       formatter={(v) => [typeof v === "number" ? v.toFixed(3) : "0.000", "density"]}
                     />
                     {/* Risk zone shading */}
-                    <ReferenceArea x1={0}  x2={25}  fill={RISK_COLORS.critical}  fillOpacity={0.05} />
-                    <ReferenceArea x1={25} x2={50}  fill={RISK_COLORS.high}      fillOpacity={0.05} />
-                    <ReferenceArea x1={50} x2={75}  fill={RISK_COLORS.moderate}  fillOpacity={0.05} />
+                    <ReferenceArea x1={0} x2={25} fill={RISK_COLORS.critical} fillOpacity={0.05} />
+                    <ReferenceArea x1={25} x2={50} fill={RISK_COLORS.high} fillOpacity={0.05} />
+                    <ReferenceArea x1={50} x2={75} fill={RISK_COLORS.moderate} fillOpacity={0.05} />
                     <ReferenceArea x1={75} x2={100} fill={RISK_COLORS.favorable} fillOpacity={0.05} />
                     {/* Mean reference line */}
                     <ReferenceLine
@@ -1974,10 +1975,10 @@ export default function Home() {
                 {/* Zone legend */}
                 <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border-subtle)" }}>
                   {[
-                    { label: "Critical 0–25%",  color: RISK_COLORS.critical },
-                    { label: "High 25–50%",     color: RISK_COLORS.high },
+                    { label: "Critical 0–25%", color: RISK_COLORS.critical },
+                    { label: "High 25–50%", color: RISK_COLORS.high },
                     { label: "Moderate 50–75%", color: RISK_COLORS.moderate },
-                    { label: "Strong 75–100%",  color: RISK_COLORS.favorable },
+                    { label: "Strong 75–100%", color: RISK_COLORS.favorable },
                   ].map(z => (
                     <span key={z.label} style={{ fontFamily: "var(--font-data)", fontSize: 9, color: "var(--text-ghost)", letterSpacing: "0.04em" }}>
                       <span style={{ color: z.color }}>■</span> {z.label}
@@ -1986,7 +1987,6 @@ export default function Home() {
                 </div>
               </div>
             </section>
-
             {/* ── PORTFOLIO ADD ── */}
             <section style={{ marginBottom: 20 }}>
               <button
@@ -2013,10 +2013,8 @@ export default function Home() {
                 ⊕ Add to Portfolio Analysis {portfolio.length > 0 ? `(${portfolio.length}/4)` : ""}
               </button>
             </section>
-
             {/* ── COPULA PANEL ── */}
             <CopulaPanel apiUrl={API_URL} baseProbability={baseProbability} initialFactors={extractedRiskFactors} />
-
             {/* ── DECISION SUMMARY ── */}
             {decisionSummary && (
               <section style={{ marginBottom: 28 }} className="animate-slide-up delay-500">
@@ -2046,14 +2044,11 @@ export default function Home() {
             )}
           </div>
         )}
-
         {/* ═══ EMPTY STATE ═══ */}
         {!result && !simulating && !extracting && !error && (
           <WelcomeState />
         )}
-
         <Divider />
-
         {/* ═══ HISTORY ═══ */}
         {history.length > 0 && (
           <section style={{ marginBottom: 32 }}>
@@ -2101,7 +2096,6 @@ export default function Home() {
             </div>
           </section>
         )}
-
         {/* ═══ PORTFOLIO ═══ */}
         {portfolio.length >= 2 && (
           <section style={{ marginBottom: 32 }}>
@@ -2144,12 +2138,12 @@ export default function Home() {
                     {portfolioResult.recommendation_basis}
                   </p>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {portfolioResult.ranked_labels.map((label, i) => {
+                    {portfolioResult.ranked_labels.map((label) => {
                       const s = portfolio.find(x => x.label === label);
                       return (
                         <div key={label} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                          <span style={{ fontFamily: "var(--font-data)", fontSize: 16, fontWeight: 700, color: i === 0 ? "var(--text-white)" : "var(--text-muted)", width: 20 }}>
-                            {i + 1}
+                          <span style={{ fontFamily: "var(--font-data)", fontSize: 16, fontWeight: 700, color: portfolioResult.ranked_labels.indexOf(label) === 0 ? "var(--text-white)" : "var(--text-muted)", width: 20 }}>
+                            {portfolioResult.ranked_labels.indexOf(label) + 1}
                           </span>
                           <span style={{ fontFamily: "var(--font-data)", fontSize: 11, color: "var(--text-secondary)", flex: 1 }}>
                             {label} — {s?.description}
@@ -2172,7 +2166,6 @@ export default function Home() {
             </div>
           </section>
         )}
-
         {/* ═══ FOOTER ═══ */}
         <footer className="site-footer">
           <Link href="/model-card" className="nav-link">Model Card</Link>
