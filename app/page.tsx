@@ -25,6 +25,8 @@ type ExtractionResult = {
   domain: string;
   reasoning: string;
   extraction_mode: string;
+  suggested_threshold?: number;
+  suggested_correlation?: number;
 };
 type SimulationResult = {
   mean: number;
@@ -188,6 +190,27 @@ type ChartPoint = {
   densityA?: number;
   densityB?: number;
 };
+
+// ── AUDIT TYPES (v3) ─────────────────────────────────────────────────────────
+type CheckResult = {
+  check_name: string;
+  passed: boolean;
+  severity: "info" | "warning" | "error";
+  message: string;
+  suggested_fix?: string | null;
+};
+
+type AuditResult = {
+  overall_verdict: "valid" | "review" | "suspect";
+  confidence_in_result: "high" | "medium" | "low";
+  checks: CheckResult[];
+  error_count: number;
+  warning_count: number;
+  auditor_note: string;
+  ai_review: string | null;
+  audit_mode: string;
+};
+
 // ══════════════════════════════════════════════════════════════════════════════
 // CONSTANTS
 // ══════════════════════════════════════════════════════════════════════════════
@@ -240,6 +263,19 @@ function getRiskLabel(mean: number) {
   if (pct < 72) return { level: "favorable", label: "Favorable", color: "#34d399" };
   return { level: "strong", label: "Strong", color: "#10b981" };
 }
+// ── Deduplication helper for PDF/JSON export ──────────────────────────────
+function deduplicateForExport(scenarios: StoredScenario[]): StoredScenario[] {
+  const normalise = (s: string) =>
+    s.toLowerCase().replace(/[^\w\s]/g, "").replace(/\s+/g, " ").trim().slice(0, 80);
+  const seen = new Map<string, StoredScenario>();
+  for (const entry of scenarios) {
+    const key = normalise(entry.description);
+    if (!seen.has(key)) {
+      seen.set(key, entry);
+    }
+  }
+  return Array.from(seen.values()).reverse();
+}
 // ══════════════════════════════════════════════════════════════════════════════
 // SMALL COMPONENTS
 // ══════════════════════════════════════════════════════════════════════════════
@@ -263,7 +299,6 @@ function Divider({ label }: { label?: string }) {
 function Badge({ children, variant = "ghost" }: { children: React.ReactNode; variant?: "blue" | "green" | "amber" | "red" | "ghost" }) {
   return <span className={`badge badge-${variant}`}>{children}</span>;
 }
-// Extraction mode indicator
 function ExtractionBadge({ mode }: { mode: string }) {
   const isAI = mode.startsWith("ai");
   return (
@@ -272,7 +307,6 @@ function ExtractionBadge({ mode }: { mode: string }) {
     </Badge>
   );
 }
-// Risk classification pill
 function RiskPill({ label, color }: { label: string; color: string }) {
   return (
     <span
@@ -288,7 +322,6 @@ function RiskPill({ label, color }: { label: string; color: string }) {
     </span>
   );
 }
-// Convergence dot
 function ConvergenceDot({ rhat }: { rhat: number }) {
   const ok = rhat < 1.05;
   const color = ok ? "#10b981" : "#f87171";
@@ -305,7 +338,6 @@ function ConvergenceDot({ rhat }: { rhat: number }) {
     </span>
   );
 }
-// Metric card — used in stats grid
 function MetricCard({
   label, value, note, accent = false, color,
 }: {
@@ -328,7 +360,6 @@ function MetricCard({
     </div>
   );
 }
-// Slider with visual fill and value
 function SliderField({
   label, subLabel, value, min, max, step, onChange, format,
   note, accentColor,
@@ -389,11 +420,12 @@ function SliderField({
 // COPULA PANEL
 // ══════════════════════════════════════════════════════════════════════════════
 function CopulaPanel({
-  apiUrl, baseProbability, initialFactors,
+  apiUrl, baseProbability, initialFactors, initialCorrelation,
 }: {
   apiUrl: string;
   baseProbability: number;
   initialFactors?: ExtractionResult["risk_factors"];
+  initialCorrelation?: number | null;
 }) {
   const [open, setOpen] = useState(false);
   const [factors, setFactors] = useState<RiskFactor[]>(() => {
@@ -409,7 +441,7 @@ function CopulaPanel({
       { name: "Secondary risk factor", probability: 0.20, confidence: 0.70 },
     ];
   });
-  const [correlation, setCorrelation] = useState(0.4);
+  const [correlation, setCorrelation] = useState(initialCorrelation ?? 0.4);
   const [copulaType, setCopulaType] = useState<"gaussian" | "student_t">("gaussian");
   const [result, setResult] = useState<CopulaResult | null>(null);
   const [running, setRunning] = useState(false);
@@ -480,6 +512,14 @@ function CopulaPanel({
               </button>
             ))}
           </div>
+          {initialCorrelation != null && (
+            <p style={{
+              fontFamily: "var(--font-data)", fontSize: 9,
+              color: "var(--amber)", letterSpacing: "0.08em", marginBottom: 10,
+            }}>
+              ⚡ ρ = {initialCorrelation.toFixed(2)} pre-filled from AI extraction
+            </p>
+          )}
           {/* Risk factors */}
           {factors.map((f, i) => (
             <div key={i} style={{ marginBottom: 10, padding: "12px 14px", background: "var(--surface-2)", borderLeft: "2px solid var(--border-mid)" }}>
@@ -748,6 +788,234 @@ function DecisionPanel({
               })}
             </div>
           </div>
+          {result.threshold_used < 0.05 && (
+  <div style={{
+    marginTop: 12,
+    padding: "10px 14px",
+    background: "rgba(245,158,11,0.06)",
+    border: "1px solid rgba(245,158,11,0.3)",
+    borderLeft: "3px solid var(--amber)",
+  }}>
+    <p style={{
+      fontFamily: "var(--font-data)",
+      fontSize: 9,
+      color: "var(--amber)",
+      letterSpacing: "0.12em",
+      textTransform: "uppercase",
+      marginBottom: 4,
+    }}>
+      Trivial threshold warning
+    </p>
+    <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+      Decision threshold τ = {(result.threshold_used * 100).toFixed(0)}%.
+      With τ near zero and no action cost, "Proceed" is always optimal —
+      the analysis is economically trivial. Set τ to your actual minimum
+      success requirement (e.g. 40%, 60%) using the slider above.
+    </p>
+  </div>
+)}
+        </div>
+      </div>
+    </div>
+  );
+}
+// ══════════════════════════════════════════════════════════════════════════════
+// AUDIT PANEL (v3)
+// ══════════════════════════════════════════════════════════════════════════════
+function AuditPanel({ result }: { result: AuditResult }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const VERDICT_CONFIG = {
+    valid:   { label: "Result Valid",   color: "var(--risk-strong)",    bg: "rgba(16,185,129,0.06)",  icon: "✓" },
+    review:  { label: "Review Advised", color: "var(--amber)",          bg: "rgba(245,158,11,0.06)",  icon: "⚠" },
+    suspect: { label: "Result Suspect", color: "var(--risk-critical)",  bg: "rgba(248,113,113,0.06)", icon: "✗" },
+  } as const;
+
+  const cfg = VERDICT_CONFIG[result.overall_verdict];
+
+  const failedChecks = result.checks.filter(c => !c.passed);
+  const passedChecks = result.checks.filter(c => c.passed);
+
+  return (
+    <div className="animate-slide-up" style={{ marginBottom: 28 }}>
+      <SectionLabel>Result Audit — Integrity Check</SectionLabel>
+      <div style={{
+        border: `1px solid ${cfg.color}33`,
+        background: "var(--surface-1)",
+      }}>
+        {/* Header */}
+        <div style={{
+          padding: "12px 16px",
+          borderBottom: `1px solid ${cfg.color}22`,
+          background: cfg.bg,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{
+              fontFamily: "var(--font-data)",
+              fontSize: 16,
+              fontWeight: 700,
+              color: cfg.color,
+            }}>
+              {cfg.icon}
+            </span>
+            <span style={{
+              fontFamily: "var(--font-data)",
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: "0.14em",
+              textTransform: "uppercase" as const,
+              color: cfg.color,
+            }}>
+              {cfg.label}
+            </span>
+            <Badge variant={
+              result.confidence_in_result === "high" ? "green"
+              : result.confidence_in_result === "medium" ? "amber"
+              : "red"
+            }>
+              {result.confidence_in_result} confidence
+            </Badge>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {result.error_count > 0 && (
+              <Badge variant="red">{result.error_count} error{result.error_count > 1 ? "s" : ""}</Badge>
+            )}
+            {result.warning_count > 0 && (
+              <Badge variant="amber">{result.warning_count} warning{result.warning_count > 1 ? "s" : ""}</Badge>
+            )}
+            <Badge variant="ghost">
+              {result.audit_mode === "full" ? "AI + deterministic" : "deterministic only"}
+            </Badge>
+          </div>
+        </div>
+
+        <div style={{ padding: "16px" }}>
+          {/* Auditor note */}
+          <p style={{
+            fontSize: 13,
+            color: "var(--text-secondary)",
+            lineHeight: 1.7,
+            marginBottom: result.ai_review ? 16 : 0,
+          }}>
+            {result.auditor_note}
+          </p>
+
+          {/* AI review */}
+          {result.ai_review && (
+            <div style={{
+              borderLeft: "2px solid var(--blue-glow)",
+              paddingLeft: 14,
+              marginBottom: 16,
+            }}>
+              <p style={{
+                fontFamily: "var(--font-data)",
+                fontSize: 9,
+                color: "var(--blue-bright)",
+                letterSpacing: "0.14em",
+                textTransform: "uppercase" as const,
+                marginBottom: 5,
+              }}>
+                AI Semantic Review — Llama 3.3 70B
+              </p>
+              <p style={{
+                fontFamily: "var(--font-display)",
+                fontSize: 13,
+                fontStyle: "italic",
+                color: "var(--text-secondary)",
+                lineHeight: 1.7,
+              }}>
+                {result.ai_review}
+              </p>
+            </div>
+          )}
+
+          {/* Failed checks (always visible) */}
+          {failedChecks.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              {failedChecks.map((check) => (
+                <div key={check.check_name} style={{
+                  padding: "10px 12px",
+                  marginBottom: 6,
+                  background: check.severity === "error"
+                    ? "rgba(248,113,113,0.06)"
+                    : "rgba(245,158,11,0.06)",
+                  borderLeft: `2px solid ${
+                    check.severity === "error"
+                      ? "var(--risk-critical)"
+                      : "var(--amber)"
+                  }`,
+                }}>
+                  <p style={{
+                    fontFamily: "var(--font-data)",
+                    fontSize: 9,
+                    letterSpacing: "0.12em",
+                    textTransform: "uppercase" as const,
+                    color: check.severity === "error"
+                      ? "var(--risk-critical)"
+                      : "var(--amber)",
+                    marginBottom: 4,
+                  }}>
+                    {check.severity.toUpperCase()} — {check.check_name.replace(/_/g, " ")}
+                  </p>
+                  <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6, marginBottom: check.suggested_fix ? 6 : 0 }}>
+                    {check.message}
+                  </p>
+                  {check.suggested_fix && (
+                    <p style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5 }}>
+                      → {check.suggested_fix}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Passed checks (collapsible) */}
+          {passedChecks.length > 0 && (
+            <div>
+              <button
+                onClick={() => setExpanded(!expanded)}
+                style={{
+                  fontFamily: "var(--font-data)",
+                  fontSize: 9,
+                  letterSpacing: "0.12em",
+                  textTransform: "uppercase" as const,
+                  background: "none",
+                  border: "none",
+                  color: "var(--text-ghost)",
+                  cursor: "pointer",
+                  padding: "4px 0",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <span style={{ color: "var(--risk-strong)" }}>✓</span>
+                {passedChecks.length} checks passed
+                <span style={{ opacity: 0.5, fontSize: 10 }}>{expanded ? "▴" : "▾"}</span>
+              </button>
+              {expanded && (
+                <div className="animate-fade-in" style={{ marginTop: 8 }}>
+                  {passedChecks.map((check) => (
+                    <div key={check.check_name} style={{
+                      display: "flex",
+                      gap: 8,
+                      padding: "6px 0",
+                      borderBottom: "1px solid var(--border-subtle)",
+                    }}>
+                      <span style={{ color: "var(--risk-strong)", fontFamily: "var(--font-data)", fontSize: 11, flexShrink: 0 }}>✓</span>
+                      <p style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5, margin: 0 }}>
+                        {check.message}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -850,6 +1118,8 @@ export default function Home() {
   const [error, setError] = useState("");
   const [decisionResult, setDecisionResult] = useState<DecisionResult | null>(null);
   const [decisionThreshold, setDecisionThreshold] = useState(0.5);
+  const [auditResult, setAuditResult] = useState<AuditResult | null>(null);
+  const [extractedCorrelation, setExtractedCorrelation] = useState<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   // ── Init ─────────────────────────────────────────────────────────────────
@@ -890,6 +1160,7 @@ export default function Home() {
     setStressResult(null);
     setAssumptions(null);
     setDecisionResult(null);
+    setAuditResult(null);
     setError("");
     try {
       const res = await fetch(`${API_URL}/extract`, {
@@ -908,6 +1179,12 @@ export default function Home() {
       setExtractionMode(data.extraction_mode);
       setExtractionDomain(data.domain ?? "");
       setExtractedRiskFactors(data.risk_factors ?? []);
+      if (data.suggested_threshold != null) {
+        setDecisionThreshold(data.suggested_threshold);
+      }
+      if (data.suggested_correlation != null) {
+        setExtractedCorrelation(data.suggested_correlation);
+      }
       // Assumptions
       try {
         const ar = await fetch(`${API_URL}/assumptions`, {
@@ -937,6 +1214,7 @@ export default function Home() {
     setSimulating(true);
     setSimulatingStep("Initialising Monte Carlo engine…");
     setDecisionResult(null);
+    setAuditResult(null);
     setError("");
     try {
       const res = await fetch(`${API_URL}/simulate`, {
@@ -1073,6 +1351,33 @@ export default function Home() {
           setDecisionResult(decisionData);
         }
       } catch {}
+      // ── AUDIT (v3) ────────────────────────────────────────────────────────
+      setSimulatingStep("Auditing result integrity…");
+      try {
+        const av = await fetch(`${API_URL}/validate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            description,
+            domain: extractionDomain || "other",
+            extraction_mode: extractionMode,
+            base_probability: baseProbability,
+            confidence,
+            suggested_risk: risk,
+            mean: data.mean,
+            std_dev: data.std_dev,
+            confidence_interval_low: data.confidence_interval_low,
+            confidence_interval_high: data.confidence_interval_high,
+            adjusted_probability: data.adjusted_probability ?? baseProbability * (1 - risk),
+            uncertainty_type: data.uncertainty_type ?? "aleatory-dominant",
+            aleatory_fraction: data.aleatory_fraction ?? 0.6,
+            epistemic_fraction: data.epistemic_fraction ?? 0.4,
+            eviu: data.eviu ?? 0,
+            rhat: data.rhat ?? 1.0,
+          }),
+        });
+        if (av.ok) setAuditResult(await av.json());
+      } catch {}
       // ── BUG 4 FIX: Re-save entry with all enrichment data ────────────────
       const enrichedEntry = {
         ...baseEntry,
@@ -1103,6 +1408,8 @@ export default function Home() {
           risk_label: interpretationData?.risk_profile?.label,
           risk_headline: interpretationData?.headline,
           risk_action: interpretationData?.action_framing,
+          // Copula
+          copula_correlation_input: extractedCorrelation ?? undefined,
         },
       };
       saveToHistory(enrichedEntry);
@@ -1144,7 +1451,7 @@ export default function Home() {
           title: "Probabilis Decision Simulation Report",
           author: "Rakibul Islam",
           institution: "Department of Statistics, SUST",
-          scenarios: hist.slice(0, 10).map(e => ({
+          scenarios: deduplicateForExport(hist).slice(0, 10).map(e => ({
             // ── Core ──────────────────────────────────────────────────────────
             description: e.description,
             base_probability: e.baseProbability,
@@ -1191,7 +1498,7 @@ export default function Home() {
             risk_label: e.result.risk_label ?? null,
             risk_headline: e.result.risk_headline ?? null,
             risk_action: e.result.risk_action ?? null,
-            // Copula (populated if user ran copula panel — not auto-stored yet)
+            // Copula
             copula_mean: e.result.copula_mean ?? null,
             copula_std: e.result.copula_std ?? null,
             copula_tail_5: e.result.copula_tail_5 ?? null,
@@ -1201,6 +1508,7 @@ export default function Home() {
             copula_type: e.result.copula_type ?? null,
             copula_df: e.result.copula_df ?? null,
             copula_risk_factor_names: e.result.copula_risk_factor_names ?? null,
+            copula_correlation_input: e.result.copula_correlation_input ?? null,
           })),
         }),
       });
@@ -1561,6 +1869,9 @@ export default function Home() {
                   </Badge>
                 </div>
               )}
+
+              {/* ── AUDIT PANEL ── */}
+              {auditResult && <AuditPanel result={auditResult} />}
             </section>
             {/* ── RISK INTERPRETATION ── */}
             {interpretation && (
@@ -1811,11 +2122,14 @@ export default function Home() {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({
-                        base_probability: baseProbability, confidence,
-                        mean: result.mean, std_dev: result.std_dev,
+                        base_probability: result.adjusted_probability ?? baseProbability,
+                        confidence,
+                        mean: result.mean,
+                        std_dev: result.std_dev,
                         confidence_interval_low: result.confidence_interval_low,
                         confidence_interval_high: result.confidence_interval_high,
-                        threshold: decisionThreshold, trials: 10000,
+                        threshold: decisionThreshold,
+                        trials: 10000,
                       }),
                     });
                     if (dr.ok) setDecisionResult(await dr.json());
@@ -2014,7 +2328,7 @@ export default function Home() {
               </button>
             </section>
             {/* ── COPULA PANEL ── */}
-            <CopulaPanel apiUrl={API_URL} baseProbability={baseProbability} initialFactors={extractedRiskFactors} />
+            <CopulaPanel apiUrl={API_URL} baseProbability={baseProbability} initialFactors={extractedRiskFactors} initialCorrelation={extractedCorrelation} />
             {/* ── DECISION SUMMARY ── */}
             {decisionSummary && (
               <section style={{ marginBottom: 28 }} className="animate-slide-up delay-500">
@@ -2054,7 +2368,18 @@ export default function Home() {
           <section style={{ marginBottom: 32 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
               <SectionLabel>Scenario History ({history.length})</SectionLabel>
-              <div style={{ display: "flex", gap: 16 }}>
+              <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+                {(() => {
+                  const dupeCount = history.length - deduplicateForExport(history).length;
+                  return dupeCount > 0 ? (
+                    <span style={{
+                      fontFamily: "var(--font-data)", fontSize: 9,
+                      color: "var(--amber)", letterSpacing: "0.08em",
+                    }}>
+                      {dupeCount} duplicate{dupeCount > 1 ? "s" : ""} — PDF will deduplicate
+                    </span>
+                  ) : null;
+                })()}
                 <button className="btn-ghost" onClick={() => exportJSON(history)}>↓ JSON</button>
                 <button className="btn-ghost" onClick={() => exportLatex(history)}>↓ LaTeX</button>
                 <button className="btn-ghost" onClick={() => { localStorage.removeItem(HISTORY_KEY); setHistory([]); }}>✕ Clear</button>
